@@ -97,6 +97,11 @@ public class Codegen {
         }
     }
 
+    private boolean isInterfaceType(Type ty) {
+        return ty != null && ty.kind == TypeKind.CLASS() &&
+               ty.resolvedClass != null && ty.resolvedClass.isInterface;
+    }
+
     private void emitCType(Type ty) {
         if (ty == null) {
             this.out.appendString("void");
@@ -112,10 +117,13 @@ public class Codegen {
         if (k == TypeKind.CLASS()) {
             if (ty.resolvedClass != null) {
                 this.out.appendString(ty.resolvedClass.name);
+                if (!ty.resolvedClass.isInterface) {
+                    this.out.appendByte('*');
+                }
             } else {
                 this.out.appendString(ty.className);
+                this.out.appendByte('*');
             }
-            this.out.appendByte('*');
         }
     }
 
@@ -125,6 +133,8 @@ public class Codegen {
             this.out.appendString("0");
         } else if (k == TypeKind.BOOLEAN()) {
             this.out.appendString("false");
+        } else if (this.isInterfaceType(ty)) {
+            this.out.appendString("{ NULL, NULL }");
         } else if (k == TypeKind.CLASS() || k == TypeKind.ARRAY() || k == TypeKind.NULL()) {
             this.out.appendString("NULL");
         }
@@ -185,6 +195,30 @@ public class Codegen {
     }
 
     private void emitExprAs(Expr e, Type targetType) {
+        if (this.isInterfaceType(targetType)) {
+            String iname = targetType.resolvedClass.name;
+            if (e.kind == ExprKind.NULL()) {
+                this.out.appendString("((");
+                this.out.appendString(iname);
+                this.out.appendString("){ NULL, NULL })");
+                return;
+            }
+            if (e.inferredType != null && e.inferredType.kind == TypeKind.CLASS() &&
+                e.inferredType.resolvedClass != targetType.resolvedClass) {
+                this.out.appendString("((");
+                this.out.appendString(iname);
+                this.out.appendString("){ (void*)(");
+                this.emitExpr(e);
+                this.out.appendString("), &");
+                this.out.appendString(e.inferredType.resolvedClass.name);
+                this.out.appendByte('_');
+                this.out.appendString(iname);
+                this.out.appendString("_vtable })");
+                return;
+            }
+            this.emitExpr(e);
+            return;
+        }
         if (targetType != null && targetType.kind == TypeKind.CLASS() &&
             e.inferredType != null && e.inferredType.kind == TypeKind.CLASS() &&
             targetType.resolvedClass != e.inferredType.resolvedClass) {
@@ -295,16 +329,23 @@ public class Codegen {
         }
         if (k == ExprKind.BINARY()) {
             this.out.appendByte('(');
+            boolean hasIface = this.isInterfaceType(e.left.inferredType) ||
+                               this.isInterfaceType(e.right.inferredType);
             boolean ptrCmp = (e.op == BinaryOp.EQ() || e.op == BinaryOp.NEQ()) &&
-                             e.left.inferredType != null && e.right.inferredType != null &&
-                             e.left.inferredType.kind == TypeKind.CLASS() &&
-                             e.right.inferredType.kind == TypeKind.CLASS();
+                             (hasIface ||
+                              (e.left.inferredType != null && e.right.inferredType != null &&
+                               e.left.inferredType.kind == TypeKind.CLASS() &&
+                               e.right.inferredType.kind == TypeKind.CLASS()));
             if (ptrCmp) {
                 this.out.appendString("(void*)(");
             }
             this.emitExpr(e.left);
             if (ptrCmp) {
-                this.out.appendByte(')');
+                if (this.isInterfaceType(e.left.inferredType)) {
+                    this.out.appendString(").obj");
+                } else {
+                    this.out.appendByte(')');
+                }
             }
             this.out.appendByte(' ');
             this.out.appendString(this.binaryOpStr(e.op));
@@ -314,7 +355,11 @@ public class Codegen {
             }
             this.emitExpr(e.right);
             if (ptrCmp) {
-                this.out.appendByte(')');
+                if (this.isInterfaceType(e.right.inferredType)) {
+                    this.out.appendString(").obj");
+                } else {
+                    this.out.appendByte(')');
+                }
             }
             this.out.appendByte(')');
             return;
@@ -450,6 +495,14 @@ public class Codegen {
         }
         if (k == ExprKind.NEW_ARRAY()) {
             Type elem = e.elemType;
+            if (this.isInterfaceType(elem)) {
+                this.out.appendString("rt_array_new_iface(");
+                this.emitExpr(e.left);
+                this.out.appendString(", (int32_t)sizeof(");
+                this.emitCType(elem);
+                this.out.appendString("))");
+                return;
+            }
             boolean isRef = (elem.kind == TypeKind.CLASS() || elem.kind == TypeKind.ARRAY());
             this.out.appendString("rt_array_new(");
             this.emitExpr(e.left);
@@ -512,6 +565,9 @@ public class Codegen {
                 this.out.appendInt(this.gcNextSlot);
                 this.out.appendString("] = &");
                 this.out.appendString(st.varName);
+                if (this.isInterfaceType(st.varType)) {
+                    this.out.appendString(".obj");
+                }
                 this.out.appendString(";\n");
                 this.gcNextSlot = this.gcNextSlot + 1;
             }
@@ -814,11 +870,97 @@ public class Codegen {
         this.out.appendByte(')');
     }
 
+    private void emitInterfaceTypes() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            if (cls.isInterface) {
+                this.out.appendString("typedef struct ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable {\n");
+                int m = 0;
+                while (m < cls.methods.size()) {
+                    MethodDecl md = cls.methods.get(m);
+                    this.out.appendString("    ");
+                    this.emitCType(md.returnType);
+                    this.out.appendString(" (*");
+                    this.out.appendString(md.name);
+                    this.out.appendString(")(void*");
+                    int p = 0;
+                    while (p < md.params.size()) {
+                        this.out.appendString(", ");
+                        this.emitCType(md.params.get(p).type);
+                        p = p + 1;
+                    }
+                    this.out.appendString(");\n");
+                    m = m + 1;
+                }
+                this.out.appendString("} ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable;\n");
+
+                this.out.appendString("typedef struct ");
+                this.out.appendString(cls.name);
+                this.out.appendString(" {\n");
+                this.out.appendString("    void* obj;\n");
+                this.out.appendString("    const ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable* vtable;\n} ");
+                this.out.appendString(cls.name);
+                this.out.appendString(";\n\n");
+
+                m = 0;
+                while (m < cls.methods.size()) {
+                    MethodDecl md = cls.methods.get(m);
+                    this.out.appendString("static inline ");
+                    this.emitCType(md.returnType);
+                    this.out.appendByte(' ');
+                    this.out.appendString(cls.name);
+                    this.out.appendString("__call_");
+                    this.out.appendString(md.name);
+                    this.out.appendByte('(');
+                    this.out.appendString(cls.name);
+                    this.out.appendString(" self");
+                    int p = 0;
+                    while (p < md.params.size()) {
+                        Param pm = md.params.get(p);
+                        this.out.appendString(", ");
+                        this.emitCType(pm.type);
+                        this.out.appendByte(' ');
+                        this.out.appendString(pm.name);
+                        p = p + 1;
+                    }
+                    this.out.appendString(") {\n");
+                    this.out.appendString("    rt_null_check(self.obj, \"");
+                    this.out.appendString(cls.name);
+                    this.out.appendByte('.');
+                    this.out.appendString(md.name);
+                    this.out.appendString("\");\n    ");
+                    if (md.returnType.kind != TypeKind.VOID()) {
+                        this.out.appendString("return ");
+                    }
+                    this.out.appendString("self.vtable->");
+                    this.out.appendString(md.name);
+                    this.out.appendString("(self.obj");
+                    p = 0;
+                    while (p < md.params.size()) {
+                        this.out.appendString(", ");
+                        this.out.appendString(md.params.get(p).name);
+                        p = p + 1;
+                    }
+                    this.out.appendString(");\n}\n\n");
+                    m = m + 1;
+                }
+            }
+            i = i + 1;
+        }
+    }
+
     private void emitVTableStructs() {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (cls.vtable.size() > 0) {
+            if (!cls.isInterface && cls.vtable.size() > 0) {
                 this.out.appendString("typedef struct ");
                 this.out.appendString(cls.name);
                 this.out.appendString("_VTable {\n");
@@ -854,7 +996,7 @@ public class Codegen {
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
             int v = 0;
-            while (v < cls.vtable.size()) {
+            while (!cls.isInterface && v < cls.vtable.size()) {
                 MethodDecl md = cls.vtable.get(v);
                 this.out.appendString("static inline ");
                 this.emitCType(md.returnType);
@@ -901,10 +1043,88 @@ public class Codegen {
         }
     }
 
+    private MethodDecl findImplMethod(ClassDecl cls, String name) {
+        ClassDecl c = cls;
+        while (c != null) {
+            int i = 0;
+            while (i < c.methods.size()) {
+                MethodDecl md = c.methods.get(i);
+                if (!md.isStatic && md.name.equals(name)) {
+                    return md;
+                }
+                i = i + 1;
+            }
+            c = c.superClass;
+        }
+        return null;
+    }
+
+    private boolean classImplementsIface(ClassDecl cls, ClassDecl iface) {
+        ClassDecl c = cls;
+        while (c != null) {
+            int i = 0;
+            while (i < c.impls.size()) {
+                if (c.impls.get(i) == iface) {
+                    return true;
+                }
+                i = i + 1;
+            }
+            c = c.superClass;
+        }
+        return false;
+    }
+
+    private void emitInterfaceVTables(ClassDecl cls) {
+        int j = 0;
+        while (j < this.prog.classes.size()) {
+            ClassDecl iface = this.prog.classes.get(j);
+            if (iface.isInterface && this.classImplementsIface(cls, iface)) {
+                this.out.appendString("const ");
+                this.out.appendString(iface.name);
+                this.out.appendString("_VTable ");
+                this.out.appendString(cls.name);
+                this.out.appendByte('_');
+                this.out.appendString(iface.name);
+                this.out.appendString("_vtable = {\n");
+                int m = 0;
+                while (m < iface.methods.size()) {
+                    MethodDecl im = iface.methods.get(m);
+                    MethodDecl impl = this.findImplMethod(cls, im.name);
+                    this.out.appendString("    (");
+                    this.emitCType(im.returnType);
+                    this.out.appendString(" (*)(void*");
+                    int p = 0;
+                    while (p < im.params.size()) {
+                        this.out.appendString(", ");
+                        this.emitCType(im.params.get(p).type);
+                        p = p + 1;
+                    }
+                    this.out.appendString("))");
+                    this.out.appendString(impl.owner.name);
+                    this.out.appendByte('_');
+                    this.out.appendString(impl.name);
+                    if (m + 1 < iface.methods.size()) {
+                        this.out.appendByte(',');
+                    }
+                    this.out.appendByte('\n');
+                    m = m + 1;
+                }
+                this.out.appendString("};\n");
+            }
+            j = j + 1;
+        }
+    }
+
     private void emitTypeInfos() {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
+            if (cls.isInterface) {
+                i = i + 1;
+                continue;
+            }
+
+            this.emitInterfaceVTables(cls);
 
             if (cls.vtable.size() > 0) {
                 this.out.appendString("static const ");
@@ -972,6 +1192,9 @@ public class Codegen {
                             this.out.appendString(cur.name);
                             this.out.appendString(", ");
                             this.out.appendString(fld.name);
+                            if (this.isInterfaceType(fld.type)) {
+                                this.out.appendString(".obj");
+                            }
                             this.out.appendByte(')');
                             emitted = emitted + 1;
                             if (emitted < refCount) {
@@ -1049,6 +1272,9 @@ public class Codegen {
                         this.out.appendInt(this.gcNextSlot);
                         this.out.appendString("] = &");
                         this.out.appendString(pm.name);
+                        if (this.isInterfaceType(pm.type)) {
+                            this.out.appendString(".obj");
+                        }
                         this.out.appendString(";\n");
                         this.gcNextSlot = this.gcNextSlot + 1;
                     }
@@ -1071,23 +1297,31 @@ public class Codegen {
         /* 1. Forward declarations */
         int i = 0;
         while (i < this.prog.classes.size()) {
-            String name = this.prog.classes.get(i).name;
-            this.out.appendString("typedef struct ");
-            this.out.appendString(name);
-            this.out.appendByte(' ');
-            this.out.appendString(name);
-            this.out.appendString(";\n");
+            ClassDecl cls = this.prog.classes.get(i);
+            if (!cls.isInterface) {
+                this.out.appendString("typedef struct ");
+                this.out.appendString(cls.name);
+                this.out.appendByte(' ');
+                this.out.appendString(cls.name);
+                this.out.appendString(";\n");
+            }
             i = i + 1;
         }
         this.out.appendByte('\n');
+
+        /* 1b. Interface fat-pointer types & dispatchers */
+        this.emitInterfaceTypes();
 
         /* 2. Struct definitions (ordered by inheritance depth) */
         int maxDepth = 0;
         i = 0;
         while (i < this.prog.classes.size()) {
-            int d = this.classDepth(this.prog.classes.get(i));
-            if (d > maxDepth) {
-                maxDepth = d;
+            ClassDecl c0 = this.prog.classes.get(i);
+            if (!c0.isInterface) {
+                int d = this.classDepth(c0);
+                if (d > maxDepth) {
+                    maxDepth = d;
+                }
             }
             i = i + 1;
         }
@@ -1096,7 +1330,7 @@ public class Codegen {
             i = 0;
             while (i < this.prog.classes.size()) {
                 ClassDecl cls = this.prog.classes.get(i);
-                if (this.classDepth(cls) == depth) {
+                if (!cls.isInterface && this.classDepth(cls) == depth) {
                     this.out.appendString("struct ");
                     this.out.appendString(cls.name);
                     this.out.appendString(" {\n");
@@ -1131,18 +1365,20 @@ public class Codegen {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            this.emitInitSig(cls, cls.constructor);
-            this.out.appendString(";\n");
-            this.emitMethodSig(cls, cls.constructor);
-            this.out.appendString(";\n");
-            int m = 0;
-            while (m < cls.methods.size()) {
-                MethodDecl md = cls.methods.get(m);
-                if (!md.isNative) {
-                    this.emitMethodSig(cls, md);
-                    this.out.appendString(";\n");
+            if (!cls.isInterface) {
+                this.emitInitSig(cls, cls.constructor);
+                this.out.appendString(";\n");
+                this.emitMethodSig(cls, cls.constructor);
+                this.out.appendString(";\n");
+                int m = 0;
+                while (m < cls.methods.size()) {
+                    MethodDecl md = cls.methods.get(m);
+                    if (!md.isNative) {
+                        this.emitMethodSig(cls, md);
+                        this.out.appendString(";\n");
+                    }
+                    m = m + 1;
                 }
-                m = m + 1;
             }
             i = i + 1;
         }
@@ -1156,6 +1392,10 @@ public class Codegen {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
+            if (cls.isInterface) {
+                i = i + 1;
+                continue;
+            }
 
             /* Class_init(Class* this, ...) */
             this.emitInitSig(cls, cls.constructor);

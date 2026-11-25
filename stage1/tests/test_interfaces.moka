@@ -1,0 +1,109 @@
+interface Named {
+    String getName();
+}
+
+interface Greeter {
+    String greet(String target);
+}
+
+class Person implements Greeter, Named {
+    private String name;
+
+    public Person(String name) {
+        this.name = name;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+
+    public String greet(String target) {
+        return this.name.concat(" greets ").concat(target);
+    }
+}
+
+class Animal implements Named {
+    private String name;
+
+    public Animal(String name) {
+        this.name = name;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+}
+
+class RobotDog extends Animal implements Greeter {
+    public RobotDog(String name) {
+        super(name);
+    }
+
+    public String greet(String target) {
+        return this.getName().concat(" beeps at ").concat(target);
+    }
+}
+
+class Holder {
+    public Greeter greeter;
+
+    public Holder(Greeter g) {
+        this.greeter = g;
+    }
+}
+
+class Main {
+    static native void rt_gc_collect();
+
+    private static String runGreet(Greeter g, String who) {
+        return g.greet(who);
+    }
+
+    public static int main() {
+        Person p = new Person("Alice");
+        RobotDog rd = new RobotDog("Bolt");
+
+        Greeter[] list = new Greeter[2];
+        list[0] = p;
+        list[1] = rd;
+
+        Named n1 = p;
+        Named n2 = rd; /* Inherited from Animal implements Named */
+        Holder h = new Holder(p);
+        Greeter empty = null;
+
+        if (empty != null || list[0] == null) {
+            Console.eprintln("Interface null check failed");
+            return 1;
+        }
+
+        /* Trigger GC to verify OBJ_IFACE_ARRAY, Holder.greeter, and local Greeter/Named roots */
+        for (int i = 0; i < 500; i++) {
+            Greeter tmp = new Person("tmp_".concat(String.fromInt(i)));
+            String s = tmp.greet("x");
+        }
+        Main.rt_gc_collect();
+
+        if (!list[0].greet("Bob").equals("Alice greets Bob")) {
+            Console.eprintln("Person greet failed");
+            return 1;
+        }
+        if (!list[1].greet("Bob").equals("Bolt beeps at Bob")) {
+            Console.eprintln("RobotDog greet failed");
+            return 1;
+        }
+        if (!n1.getName().equals("Alice") || !n2.getName().equals("Bolt")) {
+            Console.eprintln("Named failed");
+            return 1;
+        }
+        if (!Main.runGreet(h.greeter, "World").equals("Alice greets World")) {
+            Console.eprintln("Holder / param failed");
+            return 1;
+        }
+
+        Console.println(list[0].greet("Bob"));
+        Console.println(list[1].greet("Bob"));
+        Console.println("All Stage 1 interface tests passed!");
+        return 0;
+    }
+}

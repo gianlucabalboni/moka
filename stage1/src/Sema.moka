@@ -175,6 +175,23 @@ public class Sema {
     }
 
     private boolean isSubtype(ClassDecl sub, ClassDecl sup) {
+        if (sup.isInterface) {
+            if (sub == sup) {
+                return true;
+            }
+            ClassDecl c = sub;
+            while (c != null) {
+                int i = 0;
+                while (i < c.impls.size()) {
+                    if (c.impls.get(i) == sup) {
+                        return true;
+                    }
+                    i = i + 1;
+                }
+                c = c.superClass;
+            }
+            return false;
+        }
         ClassDecl c = sub;
         while (c != null) {
             if (c == sup) {
@@ -280,7 +297,7 @@ public class Sema {
             i = i + 1;
         }
 
-        /* Resolve superclasses & check cycles */
+        /* Resolve superclasses, interfaces & check cycles */
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
@@ -291,7 +308,29 @@ public class Sema {
                         "unknown superclass '".concat(cls.superName).concat("'"));
                     return false;
                 }
+                if (sup.isInterface) {
+                    this.errorAt(cls.line, cls.col,
+                        "cannot extend interface '".concat(cls.superName).concat("'"));
+                    return false;
+                }
                 cls.superClass = sup;
+            }
+            int k = 0;
+            while (k < cls.implCount) {
+                String iname = cls.implNames[k];
+                ClassDecl iface = this.findClass(iname);
+                if (iface == null) {
+                    this.errorAt(cls.line, cls.col,
+                        "unknown interface '".concat(iname).concat("'"));
+                    return false;
+                }
+                if (!iface.isInterface) {
+                    this.errorAt(cls.line, cls.col,
+                        "cannot implement non-interface class '".concat(iname).concat("'"));
+                    return false;
+                }
+                cls.impls.add(iface);
+                k = k + 1;
             }
             i = i + 1;
         }
@@ -418,7 +457,7 @@ public class Sema {
             i = 0;
             while (i < this.prog.classes.size()) {
                 ClassDecl cls = this.prog.classes.get(i);
-                if (this.classDepth(cls) == depth) {
+                if (!cls.isInterface && this.classDepth(cls) == depth) {
                     if (cls.superClass != null) {
                         int k = 0;
                         while (k < cls.superClass.vtable.size()) {
@@ -460,6 +499,42 @@ public class Sema {
                 i = i + 1;
             }
             depth = depth + 1;
+        }
+        return this.verifyInterfaces();
+    }
+
+    private boolean verifyInterfaces() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            if (!cls.isInterface) {
+                int k = 0;
+                while (k < cls.impls.size()) {
+                    ClassDecl iface = cls.impls.get(k);
+                    int m = 0;
+                    while (m < iface.methods.size()) {
+                        MethodDecl im = iface.methods.get(m);
+                        MethodDecl impl = this.findMethodInHierarchy(cls, im.name);
+                        if (impl == null || impl.isStatic) {
+                            this.errorAt(cls.line, cls.col,
+                                "class '".concat(cls.name)
+                                .concat("' does not implement interface method '")
+                                .concat(iface.name).concat(".").concat(im.name).concat("'"));
+                            return false;
+                        }
+                        if (!this.methodsCompatible(impl, im)) {
+                            this.errorAt(impl.line, impl.col,
+                                "method '".concat(cls.name).concat(".").concat(impl.name)
+                                .concat("' has incompatible signature for interface '")
+                                .concat(iface.name).concat("'"));
+                            return false;
+                        }
+                        m = m + 1;
+                    }
+                    k = k + 1;
+                }
+            }
+            i = i + 1;
         }
         return true;
     }
@@ -821,6 +896,10 @@ public class Sema {
             ClassDecl cls = this.findClass(e.name);
             if (cls == null) {
                 this.errorAt(e.line, e.col, "unknown class '".concat(e.name).concat("'"));
+                return;
+            }
+            if (cls.isInterface) {
+                this.errorAt(e.line, e.col, "cannot instantiate interface '".concat(e.name).concat("'"));
                 return;
             }
             e.resolvedClass = cls;

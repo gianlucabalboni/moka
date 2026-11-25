@@ -30,8 +30,11 @@ public class TokenKind {
     public static int KW_SWITCH()   { return 51; }
     public static int KW_CASE()     { return 52; }
     public static int KW_DEFAULT()  { return 53; }
-    public static int KW_EXTENDS()  { return 68; }
-    public static int KW_SUPER()    { return 69; }
+    public static int KW_EXTENDS()    { return 68; }
+    public static int KW_SUPER()      { return 69; }
+    public static int KW_INTERFACE()  { return 70; }
+    public static int KW_IMPLEMENTS() { return 71; }
+    public static int KW_IMPORT()     { return 72; }
 
     public static int LPAREN()      { return 26; }
     public static int RPAREN()      { return 27; }
@@ -145,6 +148,9 @@ public class TokenKind {
         if (k == 67) return ">>";
         if (k == 68) return "extends";
         if (k == 69) return "super";
+        if (k == 70) return "interface";
+        if (k == 71) return "implements";
+        if (k == 72) return "import";
         return "UNKNOWN";
     }
 }

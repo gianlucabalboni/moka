@@ -387,8 +387,12 @@ public class MethodList {
 
 public class ClassDecl {
     public String name;
+    public boolean isInterface;
     public String superName;
     public ClassDecl superClass;
+    public String[] implNames;
+    public int implCount;
+    public ClassList impls;
     public FieldList fields;
     public MethodDecl constructor;
     public MethodList methods;
@@ -398,11 +402,29 @@ public class ClassDecl {
 
     public ClassDecl(String name, int line, int col) {
         this.name = name;
+        this.isInterface = false;
+        this.implNames = new String[8];
+        this.implCount = 0;
+        this.impls = new ClassList();
         this.fields = new FieldList();
         this.methods = new MethodList();
         this.vtable = new MethodList();
         this.line = line;
         this.col = col;
+    }
+
+    public void addImplName(String name) {
+        if (this.implCount >= this.implNames.length) {
+            String[] next = new String[this.implNames.length * 2];
+            int i = 0;
+            while (i < this.implCount) {
+                next[i] = this.implNames[i];
+                i = i + 1;
+            }
+            this.implNames = next;
+        }
+        this.implNames[this.implCount] = name;
+        this.implCount = this.implCount + 1;
     }
 }
 

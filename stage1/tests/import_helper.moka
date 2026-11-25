@@ -1,0 +1,7 @@
+import Console;
+
+class ImportHelper {
+    public static int doubleVal(int x) {
+        return x * 2;
+    }
+}

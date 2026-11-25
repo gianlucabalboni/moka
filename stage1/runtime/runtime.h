@@ -14,8 +14,9 @@
 
 typedef enum {
     OBJ_INSTANCE = 0,
-    OBJ_VAL_ARRAY = 1, /* Primitive elements (int, byte, boolean) */
-    OBJ_REF_ARRAY = 2  /* Reference elements (Obj*) */
+    OBJ_VAL_ARRAY = 1,  /* Primitive elements (int, byte, boolean) */
+    OBJ_REF_ARRAY = 2,  /* Reference elements (Obj*) */
+    OBJ_IFACE_ARRAY = 3 /* Interface fat-pointer elements { void* obj; void* vtable; } */
 } ObjType;
 
 typedef struct RtTypeInfo {
@@ -84,6 +85,13 @@ static inline void rt_gc_mark_obj(Obj* obj) {
         for (int32_t i = 0; i < arr->length; i++) {
             Obj* child = NULL;
             memcpy(&child, arr->data + (size_t)i * sizeof(Obj*), sizeof(Obj*));
+            rt_gc_mark_obj(child);
+        }
+    } else if (obj->type == OBJ_IFACE_ARRAY) {
+        RtArray* arr = (RtArray*)obj;
+        for (int32_t i = 0; i < arr->length; i++) {
+            Obj* child = NULL;
+            memcpy(&child, arr->data + (size_t)i * (size_t)arr->elem_size, sizeof(Obj*));
             rt_gc_mark_obj(child);
         }
     }
@@ -202,6 +210,21 @@ static inline RtArray* rt_array_new(int32_t length, int32_t elem_size, bool is_r
     return arr;
 }
 
+static inline RtArray* rt_array_new_iface(int32_t length, int32_t elem_size) {
+    if (length < 0) {
+        fprintf(stderr, "moka runtime error: negative array length %d\n", length);
+        exit(1);
+    }
+    size_t data_size = (size_t)length * (size_t)elem_size;
+    RtArray* arr = (RtArray*)rt_alloc_obj(
+        sizeof(RtArray) + data_size,
+        OBJ_IFACE_ARRAY
+    );
+    arr->length = length;
+    arr->elem_size = elem_size;
+    return arr;
+}
+
 static inline RtArray* rt_byte_array_from_literal(const char* str, int32_t len) {
     RtArray* arr = rt_array_new(len, (int32_t)sizeof(uint8_t), false);
     if (len > 0 && str) {
@@ -270,6 +293,39 @@ static inline void rt_eprint_bytes(RtArray* bytes) {
     if (bytes->length > 0) {
         fwrite(bytes->data, 1, (size_t)bytes->length, stderr);
     }
+}
+
+static inline RtArray* rt_read_line_bytes(void) {
+    size_t cap = 64;
+    size_t len = 0;
+    char* buf = (char*)malloc(cap);
+    if (!buf) {
+        fprintf(stderr, "moka runtime error: out of memory\n");
+        exit(1);
+    }
+    int c;
+    while ((c = fgetc(stdin)) != EOF) {
+        if (c == '\n') {
+            break;
+        }
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char* nb = (char*)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                fprintf(stderr, "moka runtime error: out of memory\n");
+                exit(1);
+            }
+            buf = nb;
+        }
+        buf[len++] = (char)c;
+    }
+    if (len > 0 && buf[len - 1] == '\r') {
+        len--;
+    }
+    RtArray* arr = rt_byte_array_from_literal(buf, (int32_t)len);
+    free(buf);
+    return arr;
 }
 
 static inline int32_t rt_argc(void) {

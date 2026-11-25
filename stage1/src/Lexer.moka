@@ -96,8 +96,11 @@ public class Lexer {
         if (s.equals("switch"))   return TokenKind.KW_SWITCH();
         if (s.equals("case"))     return TokenKind.KW_CASE();
         if (s.equals("default"))  return TokenKind.KW_DEFAULT();
-        if (s.equals("extends"))  return TokenKind.KW_EXTENDS();
-        if (s.equals("super"))    return TokenKind.KW_SUPER();
+        if (s.equals("extends"))    return TokenKind.KW_EXTENDS();
+        if (s.equals("super"))      return TokenKind.KW_SUPER();
+        if (s.equals("interface"))  return TokenKind.KW_INTERFACE();
+        if (s.equals("implements")) return TokenKind.KW_IMPLEMENTS();
+        if (s.equals("import"))     return TokenKind.KW_IMPORT();
         return TokenKind.IDENT();
     }
 

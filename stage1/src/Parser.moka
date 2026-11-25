@@ -4,10 +4,16 @@ public class Parser {
     private Token t1;
     private Token t2;
     public boolean hadError;
+    public String[] importPaths;
+    public boolean[] importIsStd;
+    public int importCount;
 
     public Parser(Lexer lex) {
         this.lex = lex;
         this.hadError = false;
+        this.importPaths = new String[16];
+        this.importIsStd = new boolean[16];
+        this.importCount = 0;
         this.t0 = lex.next();
         this.t1 = lex.next();
         this.t2 = lex.next();
@@ -731,23 +737,48 @@ public class Parser {
         if (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE()) {
             this.advanceTok();
         }
-        Token classKw = this.expect(TokenKind.KW_CLASS(), "expected 'class'");
-        Token nameTok = this.expect(TokenKind.IDENT(), "expected class name");
-        String superName = null;
-        if (this.match(TokenKind.KW_EXTENDS())) {
-            Token supTok = this.expect(TokenKind.IDENT(), "expected superclass name after 'extends'");
-            superName = supTok.lexeme;
+        boolean isIface = false;
+        Token classKw = this.peek();
+        if (classKw.kind == TokenKind.KW_INTERFACE()) {
+            isIface = true;
+            this.advanceTok();
+        } else {
+            classKw = this.expect(TokenKind.KW_CLASS(), "expected 'class' or 'interface'");
         }
-        this.expect(TokenKind.LBRACE(), "expected '{' after class name");
-
+        Token nameTok = this.expect(TokenKind.IDENT(), "expected type name");
         ClassDecl cls = new ClassDecl(nameTok.lexeme, classKw.line, classKw.col);
-        cls.superName = superName;
+        cls.isInterface = isIface;
+
+        if (!isIface && this.match(TokenKind.KW_EXTENDS())) {
+            Token supTok = this.expect(TokenKind.IDENT(), "expected superclass name after 'extends'");
+            cls.superName = supTok.lexeme;
+        }
+        if (!isIface && this.match(TokenKind.KW_IMPLEMENTS())) {
+            Token ifaceTok = this.expect(TokenKind.IDENT(), "expected interface name after 'implements'");
+            cls.addImplName(ifaceTok.lexeme);
+            while (!this.hadError && this.match(TokenKind.COMMA())) {
+                ifaceTok = this.expect(TokenKind.IDENT(), "expected interface name");
+                cls.addImplName(ifaceTok.lexeme);
+            }
+        }
+        this.expect(TokenKind.LBRACE(), "expected '{'");
 
         while (!this.hadError &&
                this.t0.kind != TokenKind.RBRACE() &&
                this.t0.kind != TokenKind.EOF()) {
             if (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE()) {
                 this.advanceTok();
+            }
+            if (isIface) {
+                Type retTy = this.parseType(true);
+                Token mName = this.expect(TokenKind.IDENT(), "expected interface method name");
+                MethodDecl m = new MethodDecl(mName.lexeme, retTy, false,
+                                              false, false, mName.line, mName.col);
+                m.owner = cls;
+                m.params = this.parseParamList();
+                this.expect(TokenKind.SEMI(), "expected ';' after interface method signature");
+                cls.methods.add(m);
+                continue;
             }
             boolean isStatic = this.match(TokenKind.KW_STATIC());
             boolean isNative = this.match(TokenKind.KW_NATIVE());
@@ -808,7 +839,56 @@ public class Parser {
         return cls;
     }
 
+    private void addImport(String path, boolean isStd) {
+        if (this.importCount >= this.importPaths.length) {
+            int newCap = this.importPaths.length * 2;
+            String[] np = new String[newCap];
+            boolean[] ns = new boolean[newCap];
+            int i = 0;
+            while (i < this.importCount) {
+                np[i] = this.importPaths[i];
+                ns[i] = this.importIsStd[i];
+                i = i + 1;
+            }
+            this.importPaths = np;
+            this.importIsStd = ns;
+        }
+        this.importPaths[this.importCount] = path;
+        this.importIsStd[this.importCount] = isStd;
+        this.importCount = this.importCount + 1;
+    }
+
+    private void parseImports() {
+        while (!this.hadError && this.t0.kind == TokenKind.KW_IMPORT()) {
+            this.advanceTok();
+            if (this.t0.kind == TokenKind.STRING_LIT()) {
+                Token pathTok = this.advanceTok();
+                String raw = new String(this.decodeStringLit(pathTok.lexeme));
+                this.expect(TokenKind.SEMI(), "expected ';' after import");
+                this.addImport(raw, false);
+            } else if (this.t0.kind == TokenKind.IDENT()) {
+                ByteBuffer buf = new ByteBuffer(32);
+                Token seg = this.advanceTok();
+                buf.appendString(seg.lexeme);
+                while (!this.hadError &&
+                       (this.t0.kind == TokenKind.DOT() || this.t0.kind == TokenKind.SLASH())) {
+                    this.advanceTok();
+                    seg = this.expect(TokenKind.IDENT(), "expected identifier in import path");
+                    buf.appendByte('/');
+                    buf.appendString(seg.lexeme);
+                }
+                buf.appendString(".moka");
+                this.expect(TokenKind.SEMI(), "expected ';' after import");
+                this.addImport(buf.toString(), true);
+            } else {
+                this.errorAt(this.t0, "expected string literal or module name after 'import'");
+                break;
+            }
+        }
+    }
+
     public boolean parseClasses(ClassList out) {
+        this.parseImports();
         while (!this.hadError && this.t0.kind != TokenKind.EOF()) {
             out.add(this.parseClass());
         }

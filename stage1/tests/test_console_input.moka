@@ -1,0 +1,19 @@
+class Main {
+    public static int main() {
+        String name = Console.readLine();
+        int num = Console.readInt();
+
+        if (!name.equals("Moka")) {
+            Console.eprintln("readLine failed: ".concat(name));
+            return 1;
+        }
+        if (num != -42) {
+            Console.eprintln("readInt failed: ".concat(String.fromInt(num)));
+            return 1;
+        }
+
+        Console.println("Hello ".concat(name).concat("! num=").concat(String.fromInt(num)));
+        Console.println("All Stage 1 console input tests passed!");
+        return 0;
+    }
+}

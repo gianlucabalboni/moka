@@ -5,9 +5,9 @@ RUNTIME_DIR = runtime
 STD_FILES = std/String.moka std/Console.moka std/ByteBuffer.moka std/Io.moka
 SRC_FILES = src/Token.moka src/Lexer.moka src/Ast.moka src/Parser.moka src/Sema.moka src/Codegen.moka src/Main.moka
 
-.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-bootstrap clean
+.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-bootstrap clean
 
-all: mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-bootstrap
+all: mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-bootstrap
 
 stage0:
 	$(MAKE) -C ../stage0 mokac
@@ -46,6 +46,18 @@ test-features: build/mokac $(STD_FILES) tests/test_stage1_features.moka
 test-inheritance: build/mokac $(STD_FILES) tests/test_inheritance.moka
 	./build/mokac tests/test_inheritance.moka -o build/test_inheritance
 	./build/test_inheritance
+
+test-interfaces: build/mokac $(STD_FILES) tests/test_interfaces.moka
+	./build/mokac tests/test_interfaces.moka -o build/test_interfaces
+	./build/test_interfaces
+
+test-console-input: build/mokac $(STD_FILES) tests/test_console_input.moka
+	./build/mokac tests/test_console_input.moka -o build/test_console_input
+	printf "Moka\n-42\n" | ./build/test_console_input
+
+test-import: build/mokac $(STD_FILES) tests/test_import.moka tests/import_helper.moka
+	./build/mokac tests/test_import.moka -o build/test_import
+	./build/test_import
 
 test-bootstrap: build/mokac $(STD_FILES) $(SRC_FILES)
 	./build/mokac --emit-c $(STD_FILES) $(SRC_FILES) -o build/stage1_gen1.c

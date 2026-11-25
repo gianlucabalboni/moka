@@ -1,0 +1,15 @@
+import String;
+import "import_helper.moka";
+
+class Main {
+    public static int main() {
+        int v = ImportHelper.doubleVal(21);
+        if (v != 42) {
+            Console.eprintln("Import test failed");
+            return 1;
+        }
+        Console.println("Import result = ".concat(String.fromInt(v)));
+        Console.println("All Stage 1 import tests passed!");
+        return 0;
+    }
+}

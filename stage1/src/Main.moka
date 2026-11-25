@@ -35,6 +35,67 @@ public class Main {
         return "runtime";
     }
 
+    private static String dirName(String path) {
+        int lastSlash = -1;
+        int i = 0;
+        while (i < path.length()) {
+            if (path.byteAt(i) == '/') {
+                lastSlash = i;
+            }
+            i = i + 1;
+        }
+        if (lastSlash < 0) {
+            return "";
+        }
+        return path.substring(0, lastSlash + 1);
+    }
+
+    private static String normalizePath(String path) {
+        String[] segs = new String[64];
+        int segCount = 0;
+        boolean abs = (path.length() > 0 && path.byteAt(0) == '/');
+        int start = 0;
+        int i = 0;
+        while (i <= path.length()) {
+            if (i == path.length() || path.byteAt(i) == '/') {
+                if (i > start) {
+                    String part = path.substring(start, i);
+                    if (part.equals(".")) {
+                        /* skip */
+                    } else if (part.equals("..")) {
+                        if (segCount > 0 && !segs[segCount - 1].equals("..")) {
+                            segCount = segCount - 1;
+                        } else if (!abs) {
+                            segs[segCount] = part;
+                            segCount = segCount + 1;
+                        }
+                    } else {
+                        segs[segCount] = part;
+                        segCount = segCount + 1;
+                    }
+                }
+                start = i + 1;
+            }
+            i = i + 1;
+        }
+        ByteBuffer buf = new ByteBuffer(path.length() + 1);
+        if (abs) {
+            buf.appendByte('/');
+        }
+        int k = 0;
+        while (k < segCount) {
+            if (k > 0) {
+                buf.appendByte('/');
+            }
+            buf.appendString(segs[k]);
+            k = k + 1;
+        }
+        if (buf.length() == 0) {
+            return ".";
+        }
+        return buf.toString();
+    }
+
     public static int main() {
         int argc = Io.argc();
         String[] userInputs = new String[argc];
@@ -114,34 +175,71 @@ public class Main {
             emitC = true;
         }
 
-        String[] inputs = new String[userCount + 4];
-        int inputCount = 0;
+        String stdDir = Main.detectStdDir();
+        String[] queue = new String[64];
+        int queueCount = 0;
 
-        if (!noStdlib && !hasStringMoka) {
-            String stdDir = Main.detectStdDir();
-            if (!stdDir.equals("")) {
-                inputs[inputCount] = stdDir.concat("String.moka");
-                inputCount = inputCount + 1;
-                inputs[inputCount] = stdDir.concat("Console.moka");
-                inputCount = inputCount + 1;
-                inputs[inputCount] = stdDir.concat("ByteBuffer.moka");
-                inputCount = inputCount + 1;
-                inputs[inputCount] = stdDir.concat("Io.moka");
-                inputCount = inputCount + 1;
-            }
+        if (!noStdlib && !hasStringMoka && !stdDir.equals("")) {
+            queue[queueCount] = stdDir.concat("String.moka");
+            queueCount = queueCount + 1;
+            queue[queueCount] = stdDir.concat("Console.moka");
+            queueCount = queueCount + 1;
+            queue[queueCount] = stdDir.concat("ByteBuffer.moka");
+            queueCount = queueCount + 1;
+            queue[queueCount] = stdDir.concat("Io.moka");
+            queueCount = queueCount + 1;
         }
 
         int u = 0;
         while (u < userCount) {
-            inputs[inputCount] = userInputs[u];
-            inputCount = inputCount + 1;
+            if (queueCount >= queue.length) {
+                String[] nq = new String[queue.length * 2];
+                int k = 0;
+                while (k < queueCount) {
+                    nq[k] = queue[k];
+                    k = k + 1;
+                }
+                queue = nq;
+            }
+            queue[queueCount] = userInputs[u];
+            queueCount = queueCount + 1;
             u = u + 1;
         }
 
+        String[] loaded = new String[64];
+        int loadedCount = 0;
+
         Program prog = new Program();
         int f = 0;
-        while (f < inputCount) {
-            String path = inputs[f];
+        while (f < queueCount) {
+            String path = Main.normalizePath(queue[f]);
+            f = f + 1;
+
+            boolean seen = false;
+            int s = 0;
+            while (s < loadedCount) {
+                if (loaded[s].equals(path)) {
+                    seen = true;
+                    break;
+                }
+                s = s + 1;
+            }
+            if (seen) {
+                continue;
+            }
+
+            if (loadedCount >= loaded.length) {
+                String[] nl = new String[loaded.length * 2];
+                int k = 0;
+                while (k < loadedCount) {
+                    nl[k] = loaded[k];
+                    k = k + 1;
+                }
+                loaded = nl;
+            }
+            loaded[loadedCount] = path;
+            loadedCount = loadedCount + 1;
+
             byte[] src = Io.readFileBytes(path);
             if (src == null) {
                 Console.eprintln("mokac error: cannot read input file '".concat(path).concat("'"));
@@ -152,7 +250,29 @@ public class Main {
             if (!parser.parseClasses(prog.classes)) {
                 return 1;
             }
-            f = f + 1;
+
+            String baseDir = Main.dirName(path);
+            int imp = 0;
+            while (imp < parser.importCount) {
+                String resolved = "";
+                if (parser.importIsStd[imp]) {
+                    resolved = stdDir.concat(parser.importPaths[imp]);
+                } else {
+                    resolved = baseDir.concat(parser.importPaths[imp]);
+                }
+                if (queueCount >= queue.length) {
+                    String[] nq = new String[queue.length * 2];
+                    int k = 0;
+                    while (k < queueCount) {
+                        nq[k] = queue[k];
+                        k = k + 1;
+                    }
+                    queue = nq;
+                }
+                queue[queueCount] = resolved;
+                queueCount = queueCount + 1;
+                imp = imp + 1;
+            }
         }
 
         Sema sema = new Sema(prog);
