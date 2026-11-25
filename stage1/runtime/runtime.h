@@ -22,6 +22,7 @@ typedef struct RtTypeInfo {
     const char* name;
     int32_t ptr_count;
     const size_t* ptr_offsets;
+    const void* vtable;
 } RtTypeInfo;
 
 typedef struct Obj {

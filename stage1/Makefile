@@ -5,9 +5,9 @@ RUNTIME_DIR = runtime
 STD_FILES = std/String.moka std/Console.moka std/ByteBuffer.moka std/Io.moka
 SRC_FILES = src/Token.moka src/Lexer.moka src/Ast.moka src/Parser.moka src/Sema.moka src/Codegen.moka src/Main.moka
 
-.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-bootstrap clean
+.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-bootstrap clean
 
-all: mokac test-std test-lexer test-e2e test-gc test-features test-bootstrap
+all: mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-bootstrap
 
 stage0:
 	$(MAKE) -C ../stage0 mokac
@@ -42,6 +42,10 @@ test-gc: build/mokac $(STD_FILES) tests/test_gc.moka
 test-features: build/mokac $(STD_FILES) tests/test_stage1_features.moka
 	./build/mokac tests/test_stage1_features.moka -o build/test_stage1_features
 	./build/test_stage1_features
+
+test-inheritance: build/mokac $(STD_FILES) tests/test_inheritance.moka
+	./build/mokac tests/test_inheritance.moka -o build/test_inheritance
+	./build/test_inheritance
 
 test-bootstrap: build/mokac $(STD_FILES) $(SRC_FILES)
 	./build/mokac --emit-c $(STD_FILES) $(SRC_FILES) -o build/stage1_gen1.c

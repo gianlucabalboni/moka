@@ -184,6 +184,30 @@ public class Codegen {
         return "+";
     }
 
+    private void emitExprAs(Expr e, Type targetType) {
+        if (targetType != null && targetType.kind == TypeKind.CLASS() &&
+            e.inferredType != null && e.inferredType.kind == TypeKind.CLASS() &&
+            targetType.resolvedClass != e.inferredType.resolvedClass) {
+            this.out.appendString("((");
+            this.emitCType(targetType);
+            this.out.appendString(")");
+            this.emitExpr(e);
+            this.out.appendByte(')');
+            return;
+        }
+        this.emitExpr(e);
+    }
+
+    private int classDepth(ClassDecl cls) {
+        int d = 0;
+        ClassDecl c = cls.superClass;
+        while (c != null) {
+            d = d + 1;
+            c = c.superClass;
+        }
+        return d;
+    }
+
     private void emitExpr(Expr e) {
         int k = e.kind;
         if (k == ExprKind.INT_LIT()) {
@@ -208,7 +232,7 @@ public class Codegen {
             this.out.appendString("NULL");
             return;
         }
-        if (k == ExprKind.THIS()) {
+        if (k == ExprKind.THIS() || k == ExprKind.SUPER()) {
             this.out.appendString("this");
             return;
         }
@@ -271,11 +295,27 @@ public class Codegen {
         }
         if (k == ExprKind.BINARY()) {
             this.out.appendByte('(');
+            boolean ptrCmp = (e.op == BinaryOp.EQ() || e.op == BinaryOp.NEQ()) &&
+                             e.left.inferredType != null && e.right.inferredType != null &&
+                             e.left.inferredType.kind == TypeKind.CLASS() &&
+                             e.right.inferredType.kind == TypeKind.CLASS();
+            if (ptrCmp) {
+                this.out.appendString("(void*)(");
+            }
             this.emitExpr(e.left);
+            if (ptrCmp) {
+                this.out.appendByte(')');
+            }
             this.out.appendByte(' ');
             this.out.appendString(this.binaryOpStr(e.op));
             this.out.appendByte(' ');
+            if (ptrCmp) {
+                this.out.appendString("(void*)(");
+            }
             this.emitExpr(e.right);
+            if (ptrCmp) {
+                this.out.appendByte(')');
+            }
             this.out.appendByte(')');
             return;
         }
@@ -283,7 +323,7 @@ public class Codegen {
             this.out.appendByte('(');
             this.emitExpr(e.left);
             this.out.appendString(" = ");
-            this.emitExpr(e.right);
+            this.emitExprAs(e.right, e.left.inferredType);
             this.out.appendByte(')');
             return;
         }
@@ -294,17 +334,23 @@ public class Codegen {
                 this.emitExpr(obj);
                 this.out.appendString(", \"length\"))->length");
             } else {
-                String cname = obj.inferredType.resolvedClass.name;
-                if (obj.kind == ExprKind.THIS()) {
-                    this.out.appendString("this->");
+                String ownerName = e.resolvedClass.name;
+                if (obj.kind == ExprKind.THIS() || obj.kind == ExprKind.SUPER()) {
+                    if (this.currentMethod != null && e.resolvedClass == this.currentMethod.owner) {
+                        this.out.appendString("this->");
+                    } else {
+                        this.out.appendString("((");
+                        this.out.appendString(ownerName);
+                        this.out.appendString("*)this)->");
+                    }
                     this.out.appendString(e.name);
                 } else {
                     this.out.appendString("((");
-                    this.out.appendString(cname);
+                    this.out.appendString(ownerName);
                     this.out.appendString("*)rt_null_check(");
                     this.emitExpr(obj);
                     this.out.appendString(", \"");
-                    this.out.appendString(cname);
+                    this.out.appendString(ownerName);
                     this.out.appendByte('.');
                     this.out.appendString(e.name);
                     this.out.appendString("\"))->");
@@ -324,6 +370,20 @@ public class Codegen {
             return;
         }
         if (k == ExprKind.CALL()) {
+            if (e.left.kind == ExprKind.SUPER()) {
+                this.out.appendString(e.resolvedClass.name);
+                this.out.appendString("_init((");
+                this.out.appendString(e.resolvedClass.name);
+                this.out.appendString("*)this");
+                int i = 0;
+                while (i < e.args.size()) {
+                    this.out.appendString(", ");
+                    this.emitExprAs(e.args.get(i), e.resolvedMethod.params.get(i).type);
+                    i = i + 1;
+                }
+                this.out.appendByte(')');
+                return;
+            }
             MethodDecl m = e.resolvedMethod;
             if (m.isNative) {
                 this.out.appendString(m.name);
@@ -331,7 +391,7 @@ public class Codegen {
                 int i = 0;
                 while (i < e.args.size()) {
                     if (i > 0) this.out.appendString(", ");
-                    this.emitExpr(e.args.get(i));
+                    this.emitExprAs(e.args.get(i), m.params.get(i).type);
                     i = i + 1;
                 }
                 this.out.appendByte(')');
@@ -343,33 +403,33 @@ public class Codegen {
                 int i = 0;
                 while (i < e.args.size()) {
                     if (i > 0) this.out.appendString(", ");
-                    this.emitExpr(e.args.get(i));
+                    this.emitExprAs(e.args.get(i), m.params.get(i).type);
                     i = i + 1;
                 }
                 this.out.appendByte(')');
             } else {
                 Expr obj = e.left.left;
-                this.out.appendString(m.owner.name);
-                this.out.appendByte('_');
-                this.out.appendString(m.name);
-                this.out.appendByte('(');
-                if (obj.kind == ExprKind.THIS()) {
-                    this.out.appendString("this");
-                } else {
-                    this.out.appendByte('(');
+                if (obj.kind == ExprKind.SUPER()) {
+                    /* Non-virtual super.method(...) call */
                     this.out.appendString(m.owner.name);
-                    this.out.appendString("*)rt_null_check(");
-                    this.emitExpr(obj);
-                    this.out.appendString(", \"");
-                    this.out.appendString(m.owner.name);
-                    this.out.appendByte('.');
+                    this.out.appendByte('_');
                     this.out.appendString(m.name);
-                    this.out.appendString("\")");
+                    this.out.appendString("((");
+                    this.out.appendString(m.owner.name);
+                    this.out.appendString("*)this");
+                } else {
+                    /* Virtual dispatch via VTable helper */
+                    String staticCls = obj.inferredType.resolvedClass.name;
+                    this.out.appendString(staticCls);
+                    this.out.appendString("__call_");
+                    this.out.appendString(m.name);
+                    this.out.appendByte('(');
+                    this.emitExpr(obj);
                 }
                 int i = 0;
                 while (i < e.args.size()) {
                     this.out.appendString(", ");
-                    this.emitExpr(e.args.get(i));
+                    this.emitExprAs(e.args.get(i), m.params.get(i).type);
                     i = i + 1;
                 }
                 this.out.appendByte(')');
@@ -382,7 +442,7 @@ public class Codegen {
             int i = 0;
             while (i < e.args.size()) {
                 if (i > 0) this.out.appendString(", ");
-                this.emitExpr(e.args.get(i));
+                this.emitExprAs(e.args.get(i), e.resolvedClass.constructor.params.get(i).type);
                 i = i + 1;
             }
             this.out.appendByte(')');
@@ -441,7 +501,7 @@ public class Codegen {
             this.out.appendString(st.varName);
             this.out.appendString(" = ");
             if (st.expr != null) {
-                this.emitExpr(st.expr);
+                this.emitExprAs(st.expr, st.varType);
             } else {
                 this.emitZeroValue(st.varType);
             }
@@ -527,7 +587,7 @@ public class Codegen {
             this.emitIndent();
             this.out.appendString("for (; ");
             if (st.expr != null) {
-                this.emitExpr(st.expr);
+                this.emitExprAs(st.expr, st.varType);
             } else {
                 this.out.appendString("true");
             }
@@ -622,13 +682,13 @@ public class Codegen {
                     this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
                 }
                 this.emitIndent();
-                this.out.appendString("return this;\n");
+                this.out.appendString("return;\n");
             } else if (st.expr != null) {
                 if (this.gcTotalSlots > 0) {
                     this.emitIndent();
                     this.emitCType(this.currentMethod.returnType);
                     this.out.appendString(" _gc_ret = ");
-                    this.emitExpr(st.expr);
+                    this.emitExprAs(st.expr, this.currentMethod.returnType);
                     this.out.appendString(";\n");
                     this.emitIndent();
                     this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
@@ -637,7 +697,7 @@ public class Codegen {
                 } else {
                     this.emitIndent();
                     this.out.appendString("return ");
-                    this.emitExpr(st.expr);
+                    this.emitExprAs(st.expr, this.currentMethod.returnType);
                     this.out.appendString(";\n");
                 }
             } else {
@@ -734,39 +794,194 @@ public class Codegen {
         return null;
     }
 
+    private void emitInitSig(ClassDecl cls, MethodDecl ctor) {
+        this.out.appendString("void ");
+        this.out.appendString(cls.name);
+        this.out.appendString("_init(");
+        this.out.appendString(cls.name);
+        this.out.appendString("* this");
+        if (ctor != null) {
+            int i = 0;
+            while (i < ctor.params.size()) {
+                this.out.appendString(", ");
+                Param p = ctor.params.get(i);
+                this.emitCType(p.type);
+                this.out.appendByte(' ');
+                this.out.appendString(p.name);
+                i = i + 1;
+            }
+        }
+        this.out.appendByte(')');
+    }
+
+    private void emitVTableStructs() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            if (cls.vtable.size() > 0) {
+                this.out.appendString("typedef struct ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable {\n");
+                int v = 0;
+                while (v < cls.vtable.size()) {
+                    MethodDecl md = cls.vtable.get(v);
+                    this.out.appendString("    ");
+                    this.emitCType(md.returnType);
+                    this.out.appendString(" (*");
+                    this.out.appendString(md.name);
+                    this.out.appendString(")(");
+                    this.out.appendString(cls.name);
+                    this.out.appendByte('*');
+                    int p = 0;
+                    while (p < md.params.size()) {
+                        this.out.appendString(", ");
+                        this.emitCType(md.params.get(p).type);
+                        p = p + 1;
+                    }
+                    this.out.appendString(");\n");
+                    v = v + 1;
+                }
+                this.out.appendString("} ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable;\n\n");
+            }
+            i = i + 1;
+        }
+    }
+
+    private void emitVirtualDispatchers() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            int v = 0;
+            while (v < cls.vtable.size()) {
+                MethodDecl md = cls.vtable.get(v);
+                this.out.appendString("static inline ");
+                this.emitCType(md.returnType);
+                this.out.appendByte(' ');
+                this.out.appendString(cls.name);
+                this.out.appendString("__call_");
+                this.out.appendString(md.name);
+                this.out.appendByte('(');
+                this.out.appendString(cls.name);
+                this.out.appendString("* self");
+                int p = 0;
+                while (p < md.params.size()) {
+                    Param pm = md.params.get(p);
+                    this.out.appendString(", ");
+                    this.emitCType(pm.type);
+                    this.out.appendByte(' ');
+                    this.out.appendString(pm.name);
+                    p = p + 1;
+                }
+                this.out.appendString(") {\n");
+                this.out.appendString("    rt_null_check(self, \"");
+                this.out.appendString(cls.name);
+                this.out.appendByte('.');
+                this.out.appendString(md.name);
+                this.out.appendString("\");\n    ");
+                if (md.returnType.kind != TypeKind.VOID()) {
+                    this.out.appendString("return ");
+                }
+                this.out.appendString("((const ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable*)((Obj*)self)->type_info->vtable)->");
+                this.out.appendString(md.name);
+                this.out.appendString("(self");
+                p = 0;
+                while (p < md.params.size()) {
+                    this.out.appendString(", ");
+                    this.out.appendString(md.params.get(p).name);
+                    p = p + 1;
+                }
+                this.out.appendString(");\n}\n\n");
+                v = v + 1;
+            }
+            i = i + 1;
+        }
+    }
+
     private void emitTypeInfos() {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            int refCount = 0;
-            int f = 0;
-            while (f < cls.fields.size()) {
-                if (this.isRefType(cls.fields.get(f).type)) {
-                    refCount = refCount + 1;
+
+            if (cls.vtable.size() > 0) {
+                this.out.appendString("static const ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_vtable = {\n");
+                int v = 0;
+                while (v < cls.vtable.size()) {
+                    MethodDecl md = cls.vtable.get(v);
+                    this.out.appendString("    (");
+                    this.emitCType(md.returnType);
+                    this.out.appendString(" (*)(");
+                    this.out.appendString(cls.name);
+                    this.out.appendByte('*');
+                    int p = 0;
+                    while (p < md.params.size()) {
+                        this.out.appendString(", ");
+                        this.emitCType(md.params.get(p).type);
+                        p = p + 1;
+                    }
+                    this.out.appendString("))");
+                    this.out.appendString(md.owner.name);
+                    this.out.appendByte('_');
+                    this.out.appendString(md.name);
+                    if (v + 1 < cls.vtable.size()) {
+                        this.out.appendByte(',');
+                    }
+                    this.out.appendByte('\n');
+                    v = v + 1;
                 }
-                f = f + 1;
+                this.out.appendString("};\n");
             }
+
+            int refCount = 0;
+            ClassDecl cur = cls;
+            while (cur != null) {
+                int f = 0;
+                while (f < cur.fields.size()) {
+                    if (this.isRefType(cur.fields.get(f).type)) {
+                        refCount = refCount + 1;
+                    }
+                    f = f + 1;
+                }
+                cur = cur.superClass;
+            }
+
+            String vtableRef = "NULL";
+            if (cls.vtable.size() > 0) {
+                vtableRef = "&".concat(cls.name).concat("_vtable");
+            }
+
             if (refCount > 0) {
                 this.out.appendString("static const size_t ");
                 this.out.appendString(cls.name);
                 this.out.appendString("_ptr_offsets[] = {\n");
                 int emitted = 0;
-                f = 0;
-                while (f < cls.fields.size()) {
-                    FieldDecl fld = cls.fields.get(f);
-                    if (this.isRefType(fld.type)) {
-                        this.out.appendString("    offsetof(");
-                        this.out.appendString(cls.name);
-                        this.out.appendString(", ");
-                        this.out.appendString(fld.name);
-                        this.out.appendByte(')');
-                        emitted = emitted + 1;
-                        if (emitted < refCount) {
-                            this.out.appendByte(',');
+                cur = cls;
+                while (cur != null) {
+                    int f = 0;
+                    while (f < cur.fields.size()) {
+                        FieldDecl fld = cur.fields.get(f);
+                        if (this.isRefType(fld.type)) {
+                            this.out.appendString("    offsetof(");
+                            this.out.appendString(cur.name);
+                            this.out.appendString(", ");
+                            this.out.appendString(fld.name);
+                            this.out.appendByte(')');
+                            emitted = emitted + 1;
+                            if (emitted < refCount) {
+                                this.out.appendByte(',');
+                            }
+                            this.out.appendByte('\n');
                         }
-                        this.out.appendByte('\n');
+                        f = f + 1;
                     }
-                    f = f + 1;
+                    cur = cur.superClass;
                 }
                 this.out.appendString("};\n");
                 this.out.appendString("static const RtTypeInfo ");
@@ -777,13 +992,17 @@ public class Codegen {
                 this.out.appendInt(refCount);
                 this.out.appendString(", ");
                 this.out.appendString(cls.name);
-                this.out.appendString("_ptr_offsets };\n\n");
+                this.out.appendString("_ptr_offsets, ");
+                this.out.appendString(vtableRef);
+                this.out.appendString(" };\n\n");
             } else {
                 this.out.appendString("static const RtTypeInfo ");
                 this.out.appendString(cls.name);
                 this.out.appendString("_type_info = { \"");
                 this.out.appendString(cls.name);
-                this.out.appendString("\", 0, NULL };\n\n");
+                this.out.appendString("\", 0, NULL, ");
+                this.out.appendString(vtableRef);
+                this.out.appendString(" };\n\n");
             }
             i = i + 1;
         }
@@ -841,7 +1060,6 @@ public class Codegen {
             this.out.appendString(", _gc_slots };\n");
             this.out.appendString("    rt_shadow_stack = &_gc_frame;\n");
         }
-        this.out.appendString("    rt_gc_maybe_collect();\n");
     }
 
     public byte[] emit(String runtimeInclude) {
@@ -863,35 +1081,58 @@ public class Codegen {
         }
         this.out.appendByte('\n');
 
-        /* 2. Struct definitions */
+        /* 2. Struct definitions (ordered by inheritance depth) */
+        int maxDepth = 0;
         i = 0;
         while (i < this.prog.classes.size()) {
-            ClassDecl cls = this.prog.classes.get(i);
-            this.out.appendString("struct ");
-            this.out.appendString(cls.name);
-            this.out.appendString(" {\n");
-            this.out.appendString("    Obj header;\n");
-            int f = 0;
-            while (f < cls.fields.size()) {
-                FieldDecl fld = cls.fields.get(f);
-                this.out.appendString("    ");
-                this.emitCType(fld.type);
-                this.out.appendByte(' ');
-                this.out.appendString(fld.name);
-                this.out.appendString(";\n");
-                f = f + 1;
+            int d = this.classDepth(this.prog.classes.get(i));
+            if (d > maxDepth) {
+                maxDepth = d;
             }
-            this.out.appendString("};\n\n");
             i = i + 1;
         }
+        int depth = 0;
+        while (depth <= maxDepth) {
+            i = 0;
+            while (i < this.prog.classes.size()) {
+                ClassDecl cls = this.prog.classes.get(i);
+                if (this.classDepth(cls) == depth) {
+                    this.out.appendString("struct ");
+                    this.out.appendString(cls.name);
+                    this.out.appendString(" {\n");
+                    if (cls.superClass != null) {
+                        this.out.appendString("    ");
+                        this.out.appendString(cls.superClass.name);
+                        this.out.appendString(" base;\n");
+                    } else {
+                        this.out.appendString("    Obj header;\n");
+                    }
+                    int f = 0;
+                    while (f < cls.fields.size()) {
+                        FieldDecl fld = cls.fields.get(f);
+                        this.out.appendString("    ");
+                        this.emitCType(fld.type);
+                        this.out.appendByte(' ');
+                        this.out.appendString(fld.name);
+                        this.out.appendString(";\n");
+                        f = f + 1;
+                    }
+                    this.out.appendString("};\n\n");
+                }
+                i = i + 1;
+            }
+            depth = depth + 1;
+        }
 
-        /* 2b. GC Type Descriptors */
-        this.emitTypeInfos();
+        /* 2b. VTable struct definitions */
+        this.emitVTableStructs();
 
         /* 3. Prototypes */
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
+            this.emitInitSig(cls, cls.constructor);
+            this.out.appendString(";\n");
             this.emitMethodSig(cls, cls.constructor);
             this.out.appendString(";\n");
             int m = 0;
@@ -907,23 +1148,37 @@ public class Codegen {
         }
         this.out.appendByte('\n');
 
+        /* 3b. VTable instances, GC Type Descriptors & Virtual Dispatchers */
+        this.emitTypeInfos();
+        this.emitVirtualDispatchers();
+
         /* 4. Definitions */
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
 
-            this.emitMethodSig(cls, cls.constructor);
+            /* Class_init(Class* this, ...) */
+            this.emitInitSig(cls, cls.constructor);
             this.out.appendString(" {\n");
-            this.out.appendString("    ");
-            this.out.appendString(cls.name);
-            this.out.appendString("* this = (");
-            this.out.appendString(cls.name);
-            this.out.appendString("*)rt_alloc_instance(sizeof(");
-            this.out.appendString(cls.name);
-            this.out.appendString("), &");
-            this.out.appendString(cls.name);
-            this.out.appendString("_type_info);\n");
+            this.out.appendString("    (void)this;\n");
+            if (cls.constructor != null) {
+                int p = 0;
+                while (p < cls.constructor.params.size()) {
+                    this.out.appendString("    (void)");
+                    this.out.appendString(cls.constructor.params.get(p).name);
+                    this.out.appendString(";\n");
+                    p = p + 1;
+                }
+            }
             this.setupShadowFrame(cls.constructor, true);
+            if (cls.superClass != null &&
+                (cls.constructor == null || !cls.constructor.hasSuperCall)) {
+                this.out.appendString("    ");
+                this.out.appendString(cls.superClass.name);
+                this.out.appendString("_init((");
+                this.out.appendString(cls.superClass.name);
+                this.out.appendString("*)this);\n");
+            }
             if (cls.constructor != null && cls.constructor.body != null) {
                 this.currentMethod = cls.constructor;
                 this.indent = 1;
@@ -939,6 +1194,32 @@ public class Codegen {
             if (this.gcTotalSlots > 0) {
                 this.out.appendString("    rt_shadow_stack = _gc_frame.prev;\n");
             }
+            this.out.appendString("}\n\n");
+
+            /* Class_new(...) */
+            this.emitMethodSig(cls, cls.constructor);
+            this.out.appendString(" {\n");
+            this.out.appendString("    ");
+            this.out.appendString(cls.name);
+            this.out.appendString("* this = (");
+            this.out.appendString(cls.name);
+            this.out.appendString("*)rt_alloc_instance(sizeof(");
+            this.out.appendString(cls.name);
+            this.out.appendString("), &");
+            this.out.appendString(cls.name);
+            this.out.appendString("_type_info);\n");
+            this.out.appendString("    ");
+            this.out.appendString(cls.name);
+            this.out.appendString("_init(this");
+            if (cls.constructor != null) {
+                int p = 0;
+                while (p < cls.constructor.params.size()) {
+                    this.out.appendString(", ");
+                    this.out.appendString(cls.constructor.params.get(p).name);
+                    p = p + 1;
+                }
+            }
+            this.out.appendString(");\n");
             this.out.appendString("    return this;\n}\n\n");
 
             int m = 0;

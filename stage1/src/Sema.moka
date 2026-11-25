@@ -151,6 +151,40 @@ public class Sema {
         return null;
     }
 
+    private MethodDecl findMethodInHierarchy(ClassDecl cls, String name) {
+        ClassDecl c = cls;
+        while (c != null) {
+            MethodDecl m = this.findMethod(c, name);
+            if (m != null) {
+                return m;
+            }
+            c = c.superClass;
+        }
+        return null;
+    }
+
+    private ClassDecl findFieldOwner(ClassDecl cls, String name) {
+        ClassDecl c = cls;
+        while (c != null) {
+            if (this.findField(c, name) != null) {
+                return c;
+            }
+            c = c.superClass;
+        }
+        return null;
+    }
+
+    private boolean isSubtype(ClassDecl sub, ClassDecl sup) {
+        ClassDecl c = sub;
+        while (c != null) {
+            if (c == sup) {
+                return true;
+            }
+            c = c.superClass;
+        }
+        return false;
+    }
+
     private boolean resolveType(Type ty, int line, int col) {
         if (ty == null) {
             return true;
@@ -201,6 +235,9 @@ public class Sema {
         if (this.typesEqual(target, val)) {
             return true;
         }
+        if (target.kind == TypeKind.CLASS() && val.kind == TypeKind.CLASS()) {
+            return this.isSubtype(val.resolvedClass, target.resolvedClass);
+        }
         if ((target.kind == TypeKind.INT() && val.kind == TypeKind.BYTE()) ||
             (target.kind == TypeKind.BYTE() && val.kind == TypeKind.INT())) {
             return true;
@@ -239,6 +276,36 @@ public class Sema {
                     return false;
                 }
                 j = j + 1;
+            }
+            i = i + 1;
+        }
+
+        /* Resolve superclasses & check cycles */
+        i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            if (cls.superName != null) {
+                ClassDecl sup = this.findClass(cls.superName);
+                if (sup == null) {
+                    this.errorAt(cls.line, cls.col,
+                        "unknown superclass '".concat(cls.superName).concat("'"));
+                    return false;
+                }
+                cls.superClass = sup;
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            ClassDecl cur = cls.superClass;
+            while (cur != null) {
+                if (cur == cls) {
+                    this.errorAt(cls.line, cls.col,
+                        "cyclic inheritance involving '".concat(cls.name).concat("'"));
+                    return false;
+                }
+                cur = cur.superClass;
             }
             i = i + 1;
         }
@@ -304,6 +371,95 @@ public class Sema {
             }
 
             i = i + 1;
+        }
+        return this.buildVTables();
+    }
+
+    private int classDepth(ClassDecl cls) {
+        int d = 0;
+        ClassDecl c = cls.superClass;
+        while (c != null) {
+            d = d + 1;
+            c = c.superClass;
+        }
+        return d;
+    }
+
+    private boolean methodsCompatible(MethodDecl sub, MethodDecl base) {
+        if (sub.params.size() != base.params.size()) {
+            return false;
+        }
+        if (!this.typesEqual(sub.returnType, base.returnType)) {
+            return false;
+        }
+        int i = 0;
+        while (i < sub.params.size()) {
+            if (!this.typesEqual(sub.params.get(i).type, base.params.get(i).type)) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    private boolean buildVTables() {
+        int maxDepth = 0;
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            int d = this.classDepth(this.prog.classes.get(i));
+            if (d > maxDepth) {
+                maxDepth = d;
+            }
+            i = i + 1;
+        }
+
+        int depth = 0;
+        while (depth <= maxDepth) {
+            i = 0;
+            while (i < this.prog.classes.size()) {
+                ClassDecl cls = this.prog.classes.get(i);
+                if (this.classDepth(cls) == depth) {
+                    if (cls.superClass != null) {
+                        int k = 0;
+                        while (k < cls.superClass.vtable.size()) {
+                            cls.vtable.add(cls.superClass.vtable.get(k));
+                            k = k + 1;
+                        }
+                    }
+                    int m = 0;
+                    while (m < cls.methods.size()) {
+                        MethodDecl md = cls.methods.get(m);
+                        if (!md.isStatic && !md.isNative) {
+                            int foundIdx = -1;
+                            int v = 0;
+                            while (v < cls.vtable.size()) {
+                                if (cls.vtable.get(v).name.equals(md.name)) {
+                                    foundIdx = v;
+                                    break;
+                                }
+                                v = v + 1;
+                            }
+                            if (foundIdx >= 0) {
+                                MethodDecl base = cls.vtable.get(foundIdx);
+                                if (!this.methodsCompatible(md, base)) {
+                                    this.errorAt(md.line, md.col,
+                                        "override of '".concat(md.name)
+                                        .concat("' has incompatible signature"));
+                                    return false;
+                                }
+                                md.vtableIndex = foundIdx;
+                                cls.vtable.set(foundIdx, md);
+                            } else {
+                                md.vtableIndex = cls.vtable.size();
+                                cls.vtable.add(md);
+                            }
+                        }
+                        m = m + 1;
+                    }
+                }
+                i = i + 1;
+            }
+            depth = depth + 1;
         }
         return true;
     }
@@ -376,6 +532,18 @@ public class Sema {
                 return;
             }
             e.inferredType = Type.makeResolvedClass(this.currentClass);
+            return;
+        }
+        if (k == ExprKind.SUPER()) {
+            if (this.currentMethod != null && this.currentMethod.isStatic) {
+                this.errorAt(e.line, e.col, "'super' cannot be used in a static method");
+                return;
+            }
+            if (this.currentClass.superClass == null) {
+                this.errorAt(e.line, e.col, "'super' used in class with no superclass");
+                return;
+            }
+            e.inferredType = Type.makeResolvedClass(this.currentClass.superClass);
             return;
         }
         if (k == ExprKind.IDENT()) {
@@ -489,7 +657,10 @@ public class Sema {
                 boolean ok = (this.isNumeric(lt) && this.isNumeric(rt)) ||
                              (lt.kind == TypeKind.BOOLEAN() && rt.kind == TypeKind.BOOLEAN()) ||
                              (this.isRefType(lt) && this.isRefType(rt) &&
-                              (this.typesEqual(lt, rt) || lt.kind == TypeKind.NULL() || rt.kind == TypeKind.NULL()));
+                              (this.typesEqual(lt, rt) || lt.kind == TypeKind.NULL() || rt.kind == TypeKind.NULL() ||
+                               (lt.kind == TypeKind.CLASS() && rt.kind == TypeKind.CLASS() &&
+                                (this.isSubtype(lt.resolvedClass, rt.resolvedClass) ||
+                                 this.isSubtype(rt.resolvedClass, lt.resolvedClass)))));
                 if (!ok) {
                     this.errorAt(e.line, e.col, "incompatible types for equality comparison");
                     return;
@@ -546,12 +717,14 @@ public class Sema {
                 return;
             }
             if (objTy.kind == TypeKind.CLASS()) {
-                FieldDecl fld = this.findField(objTy.resolvedClass, e.name);
-                if (fld == null) {
+                ClassDecl owner = this.findFieldOwner(objTy.resolvedClass, e.name);
+                if (owner == null) {
                     this.errorAt(e.line, e.col, "class '".concat(objTy.resolvedClass.name)
                         .concat("' has no field '").concat(e.name).concat("'"));
                     return;
                 }
+                FieldDecl fld = this.findField(owner, e.name);
+                e.resolvedClass = owner;
                 e.inferredType = fld.type;
                 return;
             }
@@ -576,6 +749,23 @@ public class Sema {
         }
         if (k == ExprKind.CALL()) {
             Expr callee = e.left;
+            if (callee.kind == ExprKind.SUPER()) {
+                if (this.currentMethod == null || !this.currentMethod.isConstructor) {
+                    this.errorAt(e.line, e.col, "'super(...)' can only be called in a constructor");
+                    return;
+                }
+                if (this.currentClass.superClass == null) {
+                    this.errorAt(e.line, e.col, "'super(...)' used in class with no superclass");
+                    return;
+                }
+                this.currentMethod.hasSuperCall = true;
+                ClassDecl sup = this.currentClass.superClass;
+                this.checkArgs(sup.name, sup.constructor, e.args, e.line, e.col);
+                e.resolvedClass = sup;
+                e.resolvedMethod = sup.constructor;
+                e.inferredType = this.tyVoid;
+                return;
+            }
             if (callee.kind == ExprKind.FIELD()) {
                 Expr obj = callee.left;
                 String mname = callee.name;
@@ -586,7 +776,7 @@ public class Sema {
                     return;
                 }
                 ClassDecl cls = obj.inferredType.resolvedClass;
-                MethodDecl m = this.findMethod(cls, mname);
+                MethodDecl m = this.findMethodInHierarchy(cls, mname);
                 if (m == null) {
                     this.errorAt(e.line, e.col, "class '".concat(cls.name)
                         .concat("' has no method '").concat(mname).concat("'"));
@@ -605,6 +795,7 @@ public class Sema {
                     return;
                 }
                 this.checkArgs(mname, m, e.args, e.line, e.col);
+                e.resolvedClass = cls;
                 e.resolvedMethod = m;
                 e.inferredType = m.returnType;
                 return;
@@ -854,6 +1045,20 @@ public class Sema {
             ClassDecl cls = this.prog.classes.get(i);
             if (cls.constructor != null) {
                 this.checkMethod(cls, cls.constructor);
+                if (!this.hadError && cls.superClass != null && !cls.constructor.hasSuperCall) {
+                    if (cls.superClass.constructor != null &&
+                        cls.superClass.constructor.params.size() > 0) {
+                        this.errorAt(cls.constructor.line, cls.constructor.col,
+                            "constructor must call 'super(...)' for superclass '"
+                            .concat(cls.superClass.name).concat("'"));
+                    }
+                }
+            } else if (cls.superClass != null &&
+                       cls.superClass.constructor != null &&
+                       cls.superClass.constructor.params.size() > 0) {
+                this.errorAt(cls.line, cls.col,
+                    "class '".concat(cls.name)
+                    .concat("' must define a constructor calling 'super(...)'"));
             }
             int m = 0;
             while (m < cls.methods.size() && !this.hadError) {

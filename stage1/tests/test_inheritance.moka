@@ -1,0 +1,96 @@
+class Entity {
+    public String name;
+
+    public Entity(String name) {
+        this.name = name;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+}
+
+class Animal extends Entity {
+    public int legs;
+
+    public Animal(String name, int legs) {
+        super(name);
+        this.legs = legs;
+    }
+
+    public String speak() {
+        return "...";
+    }
+
+    public String describe() {
+        return this.getName().concat(" says ").concat(this.speak());
+    }
+}
+
+class Dog extends Animal {
+    public String breed;
+
+    public Dog(String name, String breed) {
+        super(name, 4);
+        this.breed = breed;
+    }
+
+    public String speak() {
+        return "woof (was ".concat(super.speak()).concat(")");
+    }
+}
+
+class Cat extends Animal {
+    public Cat(String name) {
+        super(name, 4);
+    }
+
+    public String speak() {
+        return "meow";
+    }
+}
+
+class Main {
+    static native void rt_gc_collect();
+
+    private static String callSpeak(Animal a) {
+        return a.speak();
+    }
+
+    public static int main() {
+        Dog d = new Dog("Rex", "Shepherd");
+        Cat c = new Cat("Miao");
+
+        Animal[] zoo = new Animal[2];
+        zoo[0] = d;
+        zoo[1] = c;
+
+        /* Trigger GC to verify inherited ref fields (Entity.name, Dog.breed) stay alive */
+        for (int i = 0; i < 500; i++) {
+            Animal tmp = new Cat("temp_".concat(String.fromInt(i)));
+        }
+        Main.rt_gc_collect();
+
+        if (!zoo[0].describe().equals("Rex says woof (was ...)")) {
+            Console.eprintln("Dog polymorphism failed: ".concat(zoo[0].describe()));
+            return 1;
+        }
+        if (!zoo[1].describe().equals("Miao says meow")) {
+            Console.eprintln("Cat polymorphism failed: ".concat(zoo[1].describe()));
+            return 1;
+        }
+        if (!Main.callSpeak(d).equals("woof (was ...)") || zoo[0].legs != 4) {
+            Console.eprintln("Upcast / inherited field failed");
+            return 1;
+        }
+        if (zoo[0] != d || zoo[1] == d) {
+            Console.eprintln("Subtype equality failed");
+            return 1;
+        }
+
+        Console.println(zoo[0].describe());
+        Console.println(zoo[1].describe());
+        Console.println("All Stage 1 inheritance tests passed!");
+        return 0;
+    }
+}

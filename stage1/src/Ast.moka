@@ -56,6 +56,7 @@ public class ExprKind {
     public static int NEW_ARRAY()       { return 14; }
     public static int CAST()            { return 15; }
     public static int COMPOUND_ASSIGN() { return 16; }
+    public static int SUPER()           { return 17; }
 }
 
 public class UnaryOp {
@@ -328,6 +329,8 @@ public class MethodDecl {
     public ParamList params;
     public Stmt body;
     public ClassDecl owner;
+    public int vtableIndex;
+    public boolean hasSuperCall;
     public int line;
     public int col;
 
@@ -339,6 +342,8 @@ public class MethodDecl {
         this.isStatic = isStatic;
         this.isNative = isNative;
         this.params = new ParamList();
+        this.vtableIndex = -1;
+        this.hasSuperCall = false;
         this.line = line;
         this.col = col;
     }
@@ -361,6 +366,10 @@ public class MethodList {
         return this.items[i];
     }
 
+    public void set(int i, MethodDecl item) {
+        this.items[i] = item;
+    }
+
     public void add(MethodDecl item) {
         if (this.count >= this.items.length) {
             MethodDecl[] next = new MethodDecl[this.items.length * 2];
@@ -378,9 +387,12 @@ public class MethodList {
 
 public class ClassDecl {
     public String name;
+    public String superName;
+    public ClassDecl superClass;
     public FieldList fields;
     public MethodDecl constructor;
     public MethodList methods;
+    public MethodList vtable;
     public int line;
     public int col;
 
@@ -388,6 +400,7 @@ public class ClassDecl {
         this.name = name;
         this.fields = new FieldList();
         this.methods = new MethodList();
+        this.vtable = new MethodList();
         this.line = line;
         this.col = col;
     }

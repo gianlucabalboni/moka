@@ -211,6 +211,10 @@ public class Parser {
             this.advanceTok();
             return new Expr(ExprKind.THIS(), tok.line, tok.col);
         }
+        if (k == TokenKind.KW_SUPER()) {
+            this.advanceTok();
+            return new Expr(ExprKind.SUPER(), tok.line, tok.col);
+        }
         if (k == TokenKind.IDENT()) {
             this.advanceTok();
             Expr e = new Expr(ExprKind.IDENT(), tok.line, tok.col);
@@ -729,9 +733,15 @@ public class Parser {
         }
         Token classKw = this.expect(TokenKind.KW_CLASS(), "expected 'class'");
         Token nameTok = this.expect(TokenKind.IDENT(), "expected class name");
+        String superName = null;
+        if (this.match(TokenKind.KW_EXTENDS())) {
+            Token supTok = this.expect(TokenKind.IDENT(), "expected superclass name after 'extends'");
+            superName = supTok.lexeme;
+        }
         this.expect(TokenKind.LBRACE(), "expected '{' after class name");
 
         ClassDecl cls = new ClassDecl(nameTok.lexeme, classKw.line, classKw.col);
+        cls.superName = superName;
 
         while (!this.hadError &&
                this.t0.kind != TokenKind.RBRACE() &&
