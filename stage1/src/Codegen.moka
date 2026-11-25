@@ -1,0 +1,1001 @@
+public class Codegen {
+    private Program prog;
+    private ByteBuffer out;
+    private int indent;
+    private MethodDecl currentMethod;
+
+    /* GC Shadow Stack tracking per method */
+    private int gcTotalSlots;
+    private int gcNextSlot;
+    private int[] blockStartSlot;
+    private int blockDepth;
+    private int[] loopSlotStart;
+    private int loopDepth;
+    private int[] breakSlotStart;
+    private int breakDepth;
+
+    public Codegen(Program prog) {
+        this.prog = prog;
+        this.out = new ByteBuffer(8192);
+        this.indent = 0;
+        this.gcTotalSlots = 0;
+        this.gcNextSlot = 0;
+        this.blockStartSlot = new int[64];
+        this.blockDepth = 0;
+        this.loopSlotStart = new int[64];
+        this.loopDepth = 0;
+        this.breakSlotStart = new int[64];
+        this.breakDepth = 0;
+    }
+
+    private boolean isRefType(Type ty) {
+        return ty != null && (ty.kind == TypeKind.CLASS() || ty.kind == TypeKind.ARRAY());
+    }
+
+    private int countRefVars(Stmt st) {
+        if (st == null) {
+            return 0;
+        }
+        int k = st.kind;
+        if (k == StmtKind.VAR_DECL()) {
+            if (this.isRefType(st.varType)) {
+                return 1;
+            }
+            return 0;
+        }
+        if (k == StmtKind.BLOCK()) {
+            int total = 0;
+            int i = 0;
+            while (i < st.stmts.size()) {
+                total = total + this.countRefVars(st.stmts.get(i));
+                i = i + 1;
+            }
+            return total;
+        }
+        if (k == StmtKind.IF()) {
+            return this.countRefVars(st.thenBranch) + this.countRefVars(st.elseBranch);
+        }
+        if (k == StmtKind.WHILE()) {
+            return this.countRefVars(st.thenBranch);
+        }
+        if (k == StmtKind.FOR()) {
+            return this.countRefVars(st.initStmt) + this.countRefVars(st.thenBranch);
+        }
+        if (k == StmtKind.SWITCH()) {
+            int total = 0;
+            int i = 0;
+            while (i < st.stmts.size()) {
+                Stmt c = st.stmts.get(i);
+                int j = 0;
+                while (j < c.stmts.size()) {
+                    total = total + this.countRefVars(c.stmts.get(j));
+                    j = j + 1;
+                }
+                i = i + 1;
+            }
+            return total;
+        }
+        return 0;
+    }
+
+    private void emitClearSlots(int fromSlot, int toSlot) {
+        int i = fromSlot;
+        while (i < toSlot) {
+            this.emitIndent();
+            this.out.appendString("_gc_slots[");
+            this.out.appendInt(i);
+            this.out.appendString("] = NULL;\n");
+            i = i + 1;
+        }
+    }
+
+    private void emitIndent() {
+        int i = 0;
+        while (i < this.indent) {
+            this.out.appendString("    ");
+            i = i + 1;
+        }
+    }
+
+    private void emitCType(Type ty) {
+        if (ty == null) {
+            this.out.appendString("void");
+            return;
+        }
+        int k = ty.kind;
+        if (k == TypeKind.VOID())    { this.out.appendString("void"); return; }
+        if (k == TypeKind.INT())     { this.out.appendString("int32_t"); return; }
+        if (k == TypeKind.BYTE())    { this.out.appendString("uint8_t"); return; }
+        if (k == TypeKind.BOOLEAN()) { this.out.appendString("bool"); return; }
+        if (k == TypeKind.ARRAY())   { this.out.appendString("RtArray*"); return; }
+        if (k == TypeKind.NULL())    { this.out.appendString("void*"); return; }
+        if (k == TypeKind.CLASS()) {
+            if (ty.resolvedClass != null) {
+                this.out.appendString(ty.resolvedClass.name);
+            } else {
+                this.out.appendString(ty.className);
+            }
+            this.out.appendByte('*');
+        }
+    }
+
+    private void emitZeroValue(Type ty) {
+        int k = ty.kind;
+        if (k == TypeKind.INT() || k == TypeKind.BYTE()) {
+            this.out.appendString("0");
+        } else if (k == TypeKind.BOOLEAN()) {
+            this.out.appendString("false");
+        } else if (k == TypeKind.CLASS() || k == TypeKind.ARRAY() || k == TypeKind.NULL()) {
+            this.out.appendString("NULL");
+        }
+    }
+
+    private void emitCStringLiteral(byte[] bytes) {
+        this.out.appendByte('"');
+        int i = 0;
+        while (i < bytes.length) {
+            byte c = bytes[i];
+            if (c == '\n') {
+                this.out.appendString("\\n");
+            } else if (c == '\t') {
+                this.out.appendString("\\t");
+            } else if (c == '\r') {
+                this.out.appendString("\\r");
+            } else if (c == '\\') {
+                this.out.appendString("\\\\");
+            } else if (c == '"') {
+                this.out.appendString("\\\"");
+            } else if (c < 32 || c >= 127) {
+                int v = c;
+                int d2 = v / 64;
+                int d1 = (v / 8) % 8;
+                int d0 = v % 8;
+                this.out.appendByte('\\');
+                this.out.appendByte('0' + d2);
+                this.out.appendByte('0' + d1);
+                this.out.appendByte('0' + d0);
+            } else {
+                this.out.appendByte(c);
+            }
+            i = i + 1;
+        }
+        this.out.appendByte('"');
+    }
+
+    private String binaryOpStr(int op) {
+        if (op == BinaryOp.ADD()) return "+";
+        if (op == BinaryOp.SUB()) return "-";
+        if (op == BinaryOp.MUL()) return "*";
+        if (op == BinaryOp.DIV()) return "/";
+        if (op == BinaryOp.MOD()) return "%";
+        if (op == BinaryOp.EQ())  return "==";
+        if (op == BinaryOp.NEQ()) return "!=";
+        if (op == BinaryOp.LT())  return "<";
+        if (op == BinaryOp.LE())  return "<=";
+        if (op == BinaryOp.GT())  return ">";
+        if (op == BinaryOp.GE())  return ">=";
+        if (op == BinaryOp.AND())     return "&&";
+        if (op == BinaryOp.OR())      return "||";
+        if (op == BinaryOp.BIT_AND()) return "&";
+        if (op == BinaryOp.BIT_OR())  return "|";
+        if (op == BinaryOp.BIT_XOR()) return "^";
+        if (op == BinaryOp.SHL())     return "<<";
+        if (op == BinaryOp.SHR())     return ">>";
+        return "+";
+    }
+
+    private void emitExpr(Expr e) {
+        int k = e.kind;
+        if (k == ExprKind.INT_LIT()) {
+            this.out.appendInt(e.intVal);
+            return;
+        }
+        if (k == ExprKind.CHAR_LIT()) {
+            this.out.appendString("((uint8_t)");
+            this.out.appendInt(e.charVal);
+            this.out.appendByte(')');
+            return;
+        }
+        if (k == ExprKind.BOOL_LIT()) {
+            if (e.boolVal) {
+                this.out.appendString("true");
+            } else {
+                this.out.appendString("false");
+            }
+            return;
+        }
+        if (k == ExprKind.NULL()) {
+            this.out.appendString("NULL");
+            return;
+        }
+        if (k == ExprKind.THIS()) {
+            this.out.appendString("this");
+            return;
+        }
+        if (k == ExprKind.IDENT()) {
+            this.out.appendString(e.name);
+            return;
+        }
+        if (k == ExprKind.STRING_LIT()) {
+            this.out.appendString("String_new(rt_byte_array_from_literal(");
+            this.emitCStringLiteral(e.strBytes);
+            this.out.appendString(", ");
+            this.out.appendInt(e.strBytes.length);
+            this.out.appendString("))");
+            return;
+        }
+        if (k == ExprKind.UNARY()) {
+            this.out.appendByte('(');
+            if (e.op == UnaryOp.NEG()) {
+                this.out.appendByte('-');
+                this.emitExpr(e.left);
+            } else if (e.op == UnaryOp.NOT()) {
+                this.out.appendByte('!');
+                this.emitExpr(e.left);
+            } else if (e.op == UnaryOp.BIT_NOT()) {
+                this.out.appendByte('~');
+                this.emitExpr(e.left);
+            } else if (e.op == UnaryOp.PRE_INC()) {
+                this.out.appendString("++");
+                this.emitExpr(e.left);
+            } else if (e.op == UnaryOp.PRE_DEC()) {
+                this.out.appendString("--");
+                this.emitExpr(e.left);
+            } else if (e.op == UnaryOp.POST_INC()) {
+                this.emitExpr(e.left);
+                this.out.appendString("++");
+            } else {
+                this.emitExpr(e.left);
+                this.out.appendString("--");
+            }
+            this.out.appendByte(')');
+            return;
+        }
+        if (k == ExprKind.CAST()) {
+            this.out.appendString("((");
+            this.emitCType(e.elemType);
+            this.out.appendString(")(");
+            this.emitExpr(e.left);
+            this.out.appendString("))");
+            return;
+        }
+        if (k == ExprKind.COMPOUND_ASSIGN()) {
+            this.out.appendByte('(');
+            this.emitExpr(e.left);
+            this.out.appendByte(' ');
+            this.out.appendString(this.binaryOpStr(e.op));
+            this.out.appendString("= ");
+            this.emitExpr(e.right);
+            this.out.appendByte(')');
+            return;
+        }
+        if (k == ExprKind.BINARY()) {
+            this.out.appendByte('(');
+            this.emitExpr(e.left);
+            this.out.appendByte(' ');
+            this.out.appendString(this.binaryOpStr(e.op));
+            this.out.appendByte(' ');
+            this.emitExpr(e.right);
+            this.out.appendByte(')');
+            return;
+        }
+        if (k == ExprKind.ASSIGN()) {
+            this.out.appendByte('(');
+            this.emitExpr(e.left);
+            this.out.appendString(" = ");
+            this.emitExpr(e.right);
+            this.out.appendByte(')');
+            return;
+        }
+        if (k == ExprKind.FIELD()) {
+            Expr obj = e.left;
+            if (e.isArrayLength) {
+                this.out.appendString("((RtArray*)rt_null_check(");
+                this.emitExpr(obj);
+                this.out.appendString(", \"length\"))->length");
+            } else {
+                String cname = obj.inferredType.resolvedClass.name;
+                if (obj.kind == ExprKind.THIS()) {
+                    this.out.appendString("this->");
+                    this.out.appendString(e.name);
+                } else {
+                    this.out.appendString("((");
+                    this.out.appendString(cname);
+                    this.out.appendString("*)rt_null_check(");
+                    this.emitExpr(obj);
+                    this.out.appendString(", \"");
+                    this.out.appendString(cname);
+                    this.out.appendByte('.');
+                    this.out.appendString(e.name);
+                    this.out.appendString("\"))->");
+                    this.out.appendString(e.name);
+                }
+            }
+            return;
+        }
+        if (k == ExprKind.INDEX()) {
+            this.out.appendString("(*(");
+            this.emitCType(e.inferredType);
+            this.out.appendString("*)rt_array_elem_ptr(");
+            this.emitExpr(e.left);
+            this.out.appendString(", ");
+            this.emitExpr(e.right);
+            this.out.appendString("))");
+            return;
+        }
+        if (k == ExprKind.CALL()) {
+            MethodDecl m = e.resolvedMethod;
+            if (m.isNative) {
+                this.out.appendString(m.name);
+                this.out.appendByte('(');
+                int i = 0;
+                while (i < e.args.size()) {
+                    if (i > 0) this.out.appendString(", ");
+                    this.emitExpr(e.args.get(i));
+                    i = i + 1;
+                }
+                this.out.appendByte(')');
+            } else if (m.isStatic) {
+                this.out.appendString(m.owner.name);
+                this.out.appendByte('_');
+                this.out.appendString(m.name);
+                this.out.appendByte('(');
+                int i = 0;
+                while (i < e.args.size()) {
+                    if (i > 0) this.out.appendString(", ");
+                    this.emitExpr(e.args.get(i));
+                    i = i + 1;
+                }
+                this.out.appendByte(')');
+            } else {
+                Expr obj = e.left.left;
+                this.out.appendString(m.owner.name);
+                this.out.appendByte('_');
+                this.out.appendString(m.name);
+                this.out.appendByte('(');
+                if (obj.kind == ExprKind.THIS()) {
+                    this.out.appendString("this");
+                } else {
+                    this.out.appendByte('(');
+                    this.out.appendString(m.owner.name);
+                    this.out.appendString("*)rt_null_check(");
+                    this.emitExpr(obj);
+                    this.out.appendString(", \"");
+                    this.out.appendString(m.owner.name);
+                    this.out.appendByte('.');
+                    this.out.appendString(m.name);
+                    this.out.appendString("\")");
+                }
+                int i = 0;
+                while (i < e.args.size()) {
+                    this.out.appendString(", ");
+                    this.emitExpr(e.args.get(i));
+                    i = i + 1;
+                }
+                this.out.appendByte(')');
+            }
+            return;
+        }
+        if (k == ExprKind.NEW_OBJ()) {
+            this.out.appendString(e.resolvedClass.name);
+            this.out.appendString("_new(");
+            int i = 0;
+            while (i < e.args.size()) {
+                if (i > 0) this.out.appendString(", ");
+                this.emitExpr(e.args.get(i));
+                i = i + 1;
+            }
+            this.out.appendByte(')');
+            return;
+        }
+        if (k == ExprKind.NEW_ARRAY()) {
+            Type elem = e.elemType;
+            boolean isRef = (elem.kind == TypeKind.CLASS() || elem.kind == TypeKind.ARRAY());
+            this.out.appendString("rt_array_new(");
+            this.emitExpr(e.left);
+            this.out.appendString(", (int32_t)sizeof(");
+            this.emitCType(elem);
+            this.out.appendString("), ");
+            if (isRef) {
+                this.out.appendString("true)");
+            } else {
+                this.out.appendString("false)");
+            }
+            return;
+        }
+    }
+
+    private void emitBlockBody(Stmt b, boolean isWhileBody) {
+        this.out.appendString("{\n");
+        this.indent = this.indent + 1;
+        if (isWhileBody) {
+            this.emitIndent();
+            this.out.appendString("rt_gc_maybe_collect();\n");
+        }
+        this.blockStartSlot[this.blockDepth] = this.gcNextSlot;
+        this.blockDepth = this.blockDepth + 1;
+        int i = 0;
+        while (i < b.stmts.size()) {
+            this.emitStmt(b.stmts.get(i));
+            i = i + 1;
+        }
+        this.blockDepth = this.blockDepth - 1;
+        this.emitClearSlots(this.blockStartSlot[this.blockDepth], this.gcNextSlot);
+        this.indent = this.indent - 1;
+        this.emitIndent();
+        this.out.appendByte('}');
+    }
+
+    private void emitStmt(Stmt st) {
+        int k = st.kind;
+        if (k == StmtKind.BLOCK()) {
+            this.emitIndent();
+            this.emitBlockBody(st, false);
+            this.out.appendByte('\n');
+            return;
+        }
+        if (k == StmtKind.VAR_DECL()) {
+            this.emitIndent();
+            this.emitCType(st.varType);
+            this.out.appendByte(' ');
+            this.out.appendString(st.varName);
+            this.out.appendString(" = ");
+            if (st.expr != null) {
+                this.emitExpr(st.expr);
+            } else {
+                this.emitZeroValue(st.varType);
+            }
+            this.out.appendString(";\n");
+            if (this.isRefType(st.varType)) {
+                this.emitIndent();
+                this.out.appendString("_gc_slots[");
+                this.out.appendInt(this.gcNextSlot);
+                this.out.appendString("] = &");
+                this.out.appendString(st.varName);
+                this.out.appendString(";\n");
+                this.gcNextSlot = this.gcNextSlot + 1;
+            }
+            return;
+        }
+        if (k == StmtKind.IF()) {
+            this.emitIndent();
+            this.out.appendString("if (");
+            this.emitExpr(st.expr);
+            this.out.appendString(") ");
+            if (st.thenBranch.kind == StmtKind.BLOCK()) {
+                this.emitBlockBody(st.thenBranch, false);
+            } else {
+                this.out.appendString("{\n");
+                this.indent = this.indent + 1;
+                this.emitStmt(st.thenBranch);
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendByte('}');
+            }
+            if (st.elseBranch != null) {
+                this.out.appendString(" else ");
+                if (st.elseBranch.kind == StmtKind.BLOCK()) {
+                    this.emitBlockBody(st.elseBranch, false);
+                    this.out.appendByte('\n');
+                } else {
+                    this.out.appendString("{\n");
+                    this.indent = this.indent + 1;
+                    this.emitStmt(st.elseBranch);
+                    this.indent = this.indent - 1;
+                    this.emitIndent();
+                    this.out.appendString("}\n");
+                }
+            } else {
+                this.out.appendByte('\n');
+            }
+            return;
+        }
+        if (k == StmtKind.WHILE()) {
+            this.emitIndent();
+            this.out.appendString("while (");
+            this.emitExpr(st.expr);
+            this.out.appendString(") ");
+            this.loopSlotStart[this.loopDepth] = this.gcNextSlot;
+            this.loopDepth = this.loopDepth + 1;
+            this.breakSlotStart[this.breakDepth] = this.gcNextSlot;
+            this.breakDepth = this.breakDepth + 1;
+            if (st.thenBranch.kind == StmtKind.BLOCK()) {
+                this.emitBlockBody(st.thenBranch, true);
+                this.out.appendByte('\n');
+            } else {
+                this.out.appendString("{\n");
+                this.indent = this.indent + 1;
+                this.emitIndent();
+                this.out.appendString("rt_gc_maybe_collect();\n");
+                this.emitStmt(st.thenBranch);
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("}\n");
+            }
+            this.breakDepth = this.breakDepth - 1;
+            this.loopDepth = this.loopDepth - 1;
+            return;
+        }
+        if (k == StmtKind.FOR()) {
+            this.emitIndent();
+            this.out.appendString("{\n");
+            this.indent = this.indent + 1;
+            int forInitSlot = this.gcNextSlot;
+            if (st.initStmt != null) {
+                this.emitStmt(st.initStmt);
+            }
+            this.emitIndent();
+            this.out.appendString("for (; ");
+            if (st.expr != null) {
+                this.emitExpr(st.expr);
+            } else {
+                this.out.appendString("true");
+            }
+            this.out.appendString("; ");
+            if (st.stepExpr != null) {
+                this.emitExpr(st.stepExpr);
+            }
+            this.out.appendString(") ");
+            this.loopSlotStart[this.loopDepth] = this.gcNextSlot;
+            this.loopDepth = this.loopDepth + 1;
+            this.breakSlotStart[this.breakDepth] = this.gcNextSlot;
+            this.breakDepth = this.breakDepth + 1;
+            if (st.thenBranch.kind == StmtKind.BLOCK()) {
+                this.emitBlockBody(st.thenBranch, true);
+                this.out.appendByte('\n');
+            } else {
+                this.out.appendString("{\n");
+                this.indent = this.indent + 1;
+                this.emitIndent();
+                this.out.appendString("rt_gc_maybe_collect();\n");
+                this.emitStmt(st.thenBranch);
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("}\n");
+            }
+            this.breakDepth = this.breakDepth - 1;
+            this.loopDepth = this.loopDepth - 1;
+            this.emitClearSlots(forInitSlot, this.gcNextSlot);
+            this.indent = this.indent - 1;
+            this.emitIndent();
+            this.out.appendString("}\n");
+            return;
+        }
+        if (k == StmtKind.SWITCH()) {
+            this.emitIndent();
+            this.out.appendString("switch (");
+            this.emitExpr(st.expr);
+            this.out.appendString(") {\n");
+            this.indent = this.indent + 1;
+            this.breakSlotStart[this.breakDepth] = this.gcNextSlot;
+            this.breakDepth = this.breakDepth + 1;
+            int i = 0;
+            while (i < st.stmts.size()) {
+                Stmt c = st.stmts.get(i);
+                this.emitIndent();
+                if (c.kind == StmtKind.CASE()) {
+                    this.out.appendString("case ");
+                    this.out.appendInt(c.intVal);
+                    this.out.appendString(": {\n");
+                } else {
+                    this.out.appendString("default: {\n");
+                }
+                this.indent = this.indent + 1;
+                int caseStartSlot = this.gcNextSlot;
+                int j = 0;
+                while (j < c.stmts.size()) {
+                    this.emitStmt(c.stmts.get(j));
+                    j = j + 1;
+                }
+                this.emitClearSlots(caseStartSlot, this.gcNextSlot);
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("}\n");
+                i = i + 1;
+            }
+            this.breakDepth = this.breakDepth - 1;
+            this.indent = this.indent - 1;
+            this.emitIndent();
+            this.out.appendString("}\n");
+            return;
+        }
+        if (k == StmtKind.BREAK()) {
+            if (this.gcTotalSlots > 0 && this.breakDepth > 0) {
+                this.emitClearSlots(this.breakSlotStart[this.breakDepth - 1], this.gcNextSlot);
+            }
+            this.emitIndent();
+            this.out.appendString("break;\n");
+            return;
+        }
+        if (k == StmtKind.CONTINUE()) {
+            if (this.gcTotalSlots > 0 && this.loopDepth > 0) {
+                this.emitClearSlots(this.loopSlotStart[this.loopDepth - 1], this.gcNextSlot);
+            }
+            this.emitIndent();
+            this.out.appendString("continue;\n");
+            return;
+        }
+        if (k == StmtKind.RETURN()) {
+            if (this.currentMethod != null && this.currentMethod.isConstructor) {
+                if (this.gcTotalSlots > 0) {
+                    this.emitIndent();
+                    this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
+                }
+                this.emitIndent();
+                this.out.appendString("return this;\n");
+            } else if (st.expr != null) {
+                if (this.gcTotalSlots > 0) {
+                    this.emitIndent();
+                    this.emitCType(this.currentMethod.returnType);
+                    this.out.appendString(" _gc_ret = ");
+                    this.emitExpr(st.expr);
+                    this.out.appendString(";\n");
+                    this.emitIndent();
+                    this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
+                    this.emitIndent();
+                    this.out.appendString("return _gc_ret;\n");
+                } else {
+                    this.emitIndent();
+                    this.out.appendString("return ");
+                    this.emitExpr(st.expr);
+                    this.out.appendString(";\n");
+                }
+            } else {
+                if (this.gcTotalSlots > 0) {
+                    this.emitIndent();
+                    this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
+                }
+                this.emitIndent();
+                this.out.appendString("return;\n");
+            }
+            return;
+        }
+        if (k == StmtKind.EXPR()) {
+            this.emitIndent();
+            this.emitExpr(st.expr);
+            this.out.appendString(";\n");
+            return;
+        }
+    }
+
+    private void emitMethodSig(ClassDecl cls, MethodDecl m) {
+        if (m != null && m.isConstructor) {
+            this.out.appendString(cls.name);
+            this.out.appendString("* ");
+            this.out.appendString(cls.name);
+            this.out.appendString("_new(");
+            if (m.params.size() == 0) {
+                this.out.appendString("void");
+            } else {
+                int i = 0;
+                while (i < m.params.size()) {
+                    if (i > 0) this.out.appendString(", ");
+                    Param p = m.params.get(i);
+                    this.emitCType(p.type);
+                    this.out.appendByte(' ');
+                    this.out.appendString(p.name);
+                    i = i + 1;
+                }
+            }
+            this.out.appendByte(')');
+            return;
+        }
+        if (m == null) {
+            this.out.appendString(cls.name);
+            this.out.appendString("* ");
+            this.out.appendString(cls.name);
+            this.out.appendString("_new(void)");
+            return;
+        }
+        this.emitCType(m.returnType);
+        this.out.appendByte(' ');
+        this.out.appendString(cls.name);
+        this.out.appendByte('_');
+        this.out.appendString(m.name);
+        this.out.appendByte('(');
+        boolean first = true;
+        if (!m.isStatic) {
+            this.out.appendString(cls.name);
+            this.out.appendString("* this");
+            first = false;
+        }
+        int i = 0;
+        while (i < m.params.size()) {
+            if (!first) this.out.appendString(", ");
+            first = false;
+            Param p = m.params.get(i);
+            this.emitCType(p.type);
+            this.out.appendByte(' ');
+            this.out.appendString(p.name);
+            i = i + 1;
+        }
+        if (first) {
+            this.out.appendString("void");
+        }
+        this.out.appendByte(')');
+    }
+
+    private MethodDecl findEntryMain() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            if (cls.name.equals("Main")) {
+                int m = 0;
+                while (m < cls.methods.size()) {
+                    MethodDecl md = cls.methods.get(m);
+                    if (md.isStatic && md.name.equals("main") && md.params.size() == 0) {
+                        return md;
+                    }
+                    m = m + 1;
+                }
+            }
+            i = i + 1;
+        }
+        return null;
+    }
+
+    private void emitTypeInfos() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            int refCount = 0;
+            int f = 0;
+            while (f < cls.fields.size()) {
+                if (this.isRefType(cls.fields.get(f).type)) {
+                    refCount = refCount + 1;
+                }
+                f = f + 1;
+            }
+            if (refCount > 0) {
+                this.out.appendString("static const size_t ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_ptr_offsets[] = {\n");
+                int emitted = 0;
+                f = 0;
+                while (f < cls.fields.size()) {
+                    FieldDecl fld = cls.fields.get(f);
+                    if (this.isRefType(fld.type)) {
+                        this.out.appendString("    offsetof(");
+                        this.out.appendString(cls.name);
+                        this.out.appendString(", ");
+                        this.out.appendString(fld.name);
+                        this.out.appendByte(')');
+                        emitted = emitted + 1;
+                        if (emitted < refCount) {
+                            this.out.appendByte(',');
+                        }
+                        this.out.appendByte('\n');
+                    }
+                    f = f + 1;
+                }
+                this.out.appendString("};\n");
+                this.out.appendString("static const RtTypeInfo ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_type_info = { \"");
+                this.out.appendString(cls.name);
+                this.out.appendString("\", ");
+                this.out.appendInt(refCount);
+                this.out.appendString(", ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_ptr_offsets };\n\n");
+            } else {
+                this.out.appendString("static const RtTypeInfo ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_type_info = { \"");
+                this.out.appendString(cls.name);
+                this.out.appendString("\", 0, NULL };\n\n");
+            }
+            i = i + 1;
+        }
+    }
+
+    private void setupShadowFrame(MethodDecl md, boolean hasThis) {
+        int slots = 0;
+        if (hasThis) {
+            slots = slots + 1;
+        }
+        if (md != null) {
+            int p = 0;
+            while (p < md.params.size()) {
+                if (this.isRefType(md.params.get(p).type)) {
+                    slots = slots + 1;
+                }
+                p = p + 1;
+            }
+            slots = slots + this.countRefVars(md.body);
+        }
+        this.gcTotalSlots = slots;
+        this.gcNextSlot = 0;
+        this.blockDepth = 0;
+        this.loopDepth = 0;
+        this.breakDepth = 0;
+
+        if (slots > 0) {
+            this.out.appendString("    void* _gc_slots[");
+            this.out.appendInt(slots);
+            this.out.appendString("];\n");
+            this.out.appendString("    memset(_gc_slots, 0, sizeof(_gc_slots));\n");
+            if (hasThis) {
+                this.out.appendString("    _gc_slots[");
+                this.out.appendInt(this.gcNextSlot);
+                this.out.appendString("] = &this;\n");
+                this.gcNextSlot = this.gcNextSlot + 1;
+            }
+            if (md != null) {
+                int p = 0;
+                while (p < md.params.size()) {
+                    Param pm = md.params.get(p);
+                    if (this.isRefType(pm.type)) {
+                        this.out.appendString("    _gc_slots[");
+                        this.out.appendInt(this.gcNextSlot);
+                        this.out.appendString("] = &");
+                        this.out.appendString(pm.name);
+                        this.out.appendString(";\n");
+                        this.gcNextSlot = this.gcNextSlot + 1;
+                    }
+                    p = p + 1;
+                }
+            }
+            this.out.appendString("    RtShadowFrame _gc_frame = { rt_shadow_stack, ");
+            this.out.appendInt(slots);
+            this.out.appendString(", _gc_slots };\n");
+            this.out.appendString("    rt_shadow_stack = &_gc_frame;\n");
+        }
+        this.out.appendString("    rt_gc_maybe_collect();\n");
+    }
+
+    public byte[] emit(String runtimeInclude) {
+        this.out.appendString("/* Generated by Moka Stage 1 Compiler */\n");
+        this.out.appendString("#include \"");
+        this.out.appendString(runtimeInclude);
+        this.out.appendString("\"\n\n");
+
+        /* 1. Forward declarations */
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            String name = this.prog.classes.get(i).name;
+            this.out.appendString("typedef struct ");
+            this.out.appendString(name);
+            this.out.appendByte(' ');
+            this.out.appendString(name);
+            this.out.appendString(";\n");
+            i = i + 1;
+        }
+        this.out.appendByte('\n');
+
+        /* 2. Struct definitions */
+        i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            this.out.appendString("struct ");
+            this.out.appendString(cls.name);
+            this.out.appendString(" {\n");
+            this.out.appendString("    Obj header;\n");
+            int f = 0;
+            while (f < cls.fields.size()) {
+                FieldDecl fld = cls.fields.get(f);
+                this.out.appendString("    ");
+                this.emitCType(fld.type);
+                this.out.appendByte(' ');
+                this.out.appendString(fld.name);
+                this.out.appendString(";\n");
+                f = f + 1;
+            }
+            this.out.appendString("};\n\n");
+            i = i + 1;
+        }
+
+        /* 2b. GC Type Descriptors */
+        this.emitTypeInfos();
+
+        /* 3. Prototypes */
+        i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            this.emitMethodSig(cls, cls.constructor);
+            this.out.appendString(";\n");
+            int m = 0;
+            while (m < cls.methods.size()) {
+                MethodDecl md = cls.methods.get(m);
+                if (!md.isNative) {
+                    this.emitMethodSig(cls, md);
+                    this.out.appendString(";\n");
+                }
+                m = m + 1;
+            }
+            i = i + 1;
+        }
+        this.out.appendByte('\n');
+
+        /* 4. Definitions */
+        i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+
+            this.emitMethodSig(cls, cls.constructor);
+            this.out.appendString(" {\n");
+            this.out.appendString("    ");
+            this.out.appendString(cls.name);
+            this.out.appendString("* this = (");
+            this.out.appendString(cls.name);
+            this.out.appendString("*)rt_alloc_instance(sizeof(");
+            this.out.appendString(cls.name);
+            this.out.appendString("), &");
+            this.out.appendString(cls.name);
+            this.out.appendString("_type_info);\n");
+            this.setupShadowFrame(cls.constructor, true);
+            if (cls.constructor != null && cls.constructor.body != null) {
+                this.currentMethod = cls.constructor;
+                this.indent = 1;
+                Stmt body = cls.constructor.body;
+                int s = 0;
+                while (s < body.stmts.size()) {
+                    this.emitStmt(body.stmts.get(s));
+                    s = s + 1;
+                }
+                this.indent = 0;
+                this.currentMethod = null;
+            }
+            if (this.gcTotalSlots > 0) {
+                this.out.appendString("    rt_shadow_stack = _gc_frame.prev;\n");
+            }
+            this.out.appendString("    return this;\n}\n\n");
+
+            int m = 0;
+            while (m < cls.methods.size()) {
+                MethodDecl md = cls.methods.get(m);
+                if (!md.isNative) {
+                    this.emitMethodSig(cls, md);
+                    this.out.appendString(" {\n");
+                    this.currentMethod = md;
+                    this.indent = 1;
+                    if (!md.isStatic) {
+                        this.out.appendString("    (void)this;\n");
+                    }
+                    int p = 0;
+                    while (p < md.params.size()) {
+                        this.out.appendString("    (void)");
+                        this.out.appendString(md.params.get(p).name);
+                        this.out.appendString(";\n");
+                        p = p + 1;
+                    }
+                    this.setupShadowFrame(md, !md.isStatic);
+                    if (md.body != null) {
+                        int s = 0;
+                        while (s < md.body.stmts.size()) {
+                            this.emitStmt(md.body.stmts.get(s));
+                            s = s + 1;
+                        }
+                    }
+                    if (md.returnType.kind == TypeKind.VOID() && this.gcTotalSlots > 0) {
+                        this.out.appendString("    rt_shadow_stack = _gc_frame.prev;\n");
+                    }
+                    this.indent = 0;
+                    this.currentMethod = null;
+                    this.out.appendString("}\n\n");
+                }
+                m = m + 1;
+            }
+            i = i + 1;
+        }
+
+        /* 5. Entry point */
+        MethodDecl entry = this.findEntryMain();
+        if (entry != null) {
+            this.out.appendString("int main(int argc, char** argv) {\n");
+            this.out.appendString("    rt_init(argc, argv);\n");
+            if (entry.returnType.kind == TypeKind.INT()) {
+                this.out.appendString("    int32_t exit_code = Main_main();\n");
+                this.out.appendString("    rt_shutdown();\n");
+                this.out.appendString("    return (int)exit_code;\n");
+            } else {
+                this.out.appendString("    Main_main();\n");
+                this.out.appendString("    rt_shutdown();\n");
+                this.out.appendString("    return 0;\n");
+            }
+            this.out.appendString("}\n");
+        }
+
+        return this.out.toBytes();
+    }
+}

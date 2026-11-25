@@ -1,0 +1,78 @@
+class Node {
+    public int value;
+    public Node next;
+    public String label;
+
+    public Node(int value, Node next, String label) {
+        this.value = value;
+        this.next = next;
+        this.label = label;
+    }
+}
+
+class Main {
+    static native void rt_gc_collect();
+    static native int rt_gc_live_objects();
+    static native int rt_gc_collections();
+    static native int rt_gc_freed_objects();
+
+    public static int main() {
+        /* Keep a live linked list and a live String[] */
+        Node head = null;
+        String[] arr = new String[3];
+        arr[0] = "alpha";
+        arr[1] = "beta";
+        arr[2] = "gamma";
+
+        int i = 0;
+        while (i < 50) {
+            head = new Node(i, head, "live");
+            i = i + 1;
+        }
+
+        /* Allocate lots of unreachable garbage */
+        int g = 0;
+        while (g < 10000) {
+            Node tmp = new Node(g, null, "garbage_".concat(String.fromInt(g)));
+            g = g + 1;
+        }
+
+        Main.rt_gc_collect();
+
+        int live = Main.rt_gc_live_objects();
+        int colls = Main.rt_gc_collections();
+        int freed = Main.rt_gc_freed_objects();
+
+        Console.println("GC collections: ".concat(String.fromInt(colls)));
+        Console.println("GC freed objs:  ".concat(String.fromInt(freed)));
+        Console.println("GC live objs:   ".concat(String.fromInt(live)));
+
+        if (colls <= 0 || freed < 10000) {
+            Console.eprintln("GC test failed: expected collections and freed objects");
+            return 1;
+        }
+
+        /* Verify live objects are intact */
+        int sum = 0;
+        Node cur = head;
+        while (cur != null) {
+            if (!cur.label.equals("live")) {
+                Console.eprintln("GC test failed: corrupted Node label");
+                return 1;
+            }
+            sum = sum + cur.value;
+            cur = cur.next;
+        }
+        if (sum != 1225) {
+            Console.eprintln("GC test failed: wrong sum");
+            return 1;
+        }
+        if (!arr[0].equals("alpha") || !arr[1].equals("beta") || !arr[2].equals("gamma")) {
+            Console.eprintln("GC test failed: corrupted String[]");
+            return 1;
+        }
+
+        Console.println("All Stage 1 GC tests passed!");
+        return 0;
+    }
+}

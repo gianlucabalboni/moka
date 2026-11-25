@@ -1,0 +1,31 @@
+class Main {
+    public static int main() {
+        String src = "// comment\npublic class Main { int x = 42; byte c = '\\n'; }\n";
+        Lexer lex = new Lexer("test.moka", src.bytes());
+
+        Token t0 = lex.next();
+        Token t1 = lex.next();
+        Token t2 = lex.next();
+        if (t0.kind != TokenKind.KW_PUBLIC() || t1.kind != TokenKind.KW_CLASS() || !t2.equals("Main")) {
+            Console.eprintln("Lexer test failed at header");
+            return 1;
+        }
+
+        int count = 3;
+        while (true) {
+            Token t = lex.next();
+            if (t.kind == TokenKind.ERROR()) {
+                Console.eprintln("Unexpected lexer error: ".concat(t.lexeme));
+                return 1;
+            }
+            if (t.kind == TokenKind.EOF()) {
+                break;
+            }
+            count = count + 1;
+        }
+
+        Console.println("Lexer tokens = ".concat(String.fromInt(count)));
+        Console.println("All Stage 1 lexer tests passed!");
+        return 0;
+    }
+}

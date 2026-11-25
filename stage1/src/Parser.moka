@@ -1,0 +1,807 @@
+public class Parser {
+    private Lexer lex;
+    private Token t0;
+    private Token t1;
+    private Token t2;
+    public boolean hadError;
+
+    public Parser(Lexer lex) {
+        this.lex = lex;
+        this.hadError = false;
+        this.t0 = lex.next();
+        this.t1 = lex.next();
+        this.t2 = lex.next();
+    }
+
+    private Token peek() {
+        return this.t0;
+    }
+
+    private Token advanceTok() {
+        Token cur = this.t0;
+        this.t0 = this.t1;
+        this.t1 = this.t2;
+        this.t2 = this.lex.next();
+        return cur;
+    }
+
+    private void errorAt(Token tok, String msg) {
+        if (this.hadError) {
+            return;
+        }
+        this.hadError = true;
+        String loc = this.lex.filename
+            .concat(":")
+            .concat(String.fromInt(tok.line))
+            .concat(":")
+            .concat(String.fromInt(tok.col));
+        if (tok.kind == TokenKind.ERROR()) {
+            Console.eprintln(loc.concat(": lexical error: ").concat(tok.lexeme));
+        } else {
+            Console.eprintln(loc.concat(": syntax error: ").concat(msg)
+                .concat(" (got '").concat(TokenKind.name(tok.kind)).concat("')"));
+        }
+    }
+
+    private boolean match(int kind) {
+        if (this.t0.kind == kind) {
+            this.advanceTok();
+            return true;
+        }
+        return false;
+    }
+
+    private Token expect(int kind, String msg) {
+        Token tok = this.t0;
+        if (tok.kind != kind) {
+            this.errorAt(tok, msg);
+            return tok;
+        }
+        return this.advanceTok();
+    }
+
+    private byte decodeEscape(byte c) {
+        if (c == 'n')  return '\n';
+        if (c == 't')  return '\t';
+        if (c == 'r')  return '\r';
+        if (c == '0')  return '\0';
+        if (c == '\\') return '\\';
+        if (c == '"')  return '"';
+        if (c == '\'') return '\'';
+        return c;
+    }
+
+    private byte[] decodeStringLit(String raw) {
+        int rawLen = raw.length() - 2;
+        ByteBuffer buf = new ByteBuffer(rawLen + 1);
+        int i = 1;
+        int end = raw.length() - 1;
+        while (i < end) {
+            byte c = raw.byteAt(i);
+            if (c == '\\' && i + 1 < end) {
+                i = i + 1;
+                buf.appendByte(this.decodeEscape(raw.byteAt(i)));
+            } else {
+                buf.appendByte(c);
+            }
+            i = i + 1;
+        }
+        return buf.toBytes();
+    }
+
+    private byte decodeCharLit(String raw) {
+        if (raw.length() >= 4 && raw.byteAt(1) == '\\') {
+            return this.decodeEscape(raw.byteAt(2));
+        }
+        return raw.byteAt(1);
+    }
+
+    private int parseInt(String s) {
+        int val = 0;
+        int i = 0;
+        while (i < s.length()) {
+            val = val * 10 + (s.byteAt(i) - '0');
+            i = i + 1;
+        }
+        return val;
+    }
+
+    /* =====================================================================
+     * Types
+     * ===================================================================== */
+
+    private Type parseBaseType(boolean allowVoid) {
+        Token tok = this.peek();
+        if (tok.kind == TokenKind.KW_INT()) {
+            this.advanceTok();
+            return new Type(TypeKind.INT());
+        }
+        if (tok.kind == TokenKind.KW_BYTE()) {
+            this.advanceTok();
+            return new Type(TypeKind.BYTE());
+        }
+        if (tok.kind == TokenKind.KW_BOOLEAN()) {
+            this.advanceTok();
+            return new Type(TypeKind.BOOLEAN());
+        }
+        if (tok.kind == TokenKind.KW_VOID()) {
+            if (!allowVoid) {
+                this.errorAt(tok, "'void' is not allowed as a variable or field type");
+                return new Type(TypeKind.VOID());
+            }
+            this.advanceTok();
+            return new Type(TypeKind.VOID());
+        }
+        if (tok.kind == TokenKind.IDENT()) {
+            this.advanceTok();
+            return Type.makeClass(tok.lexeme);
+        }
+        this.errorAt(tok, "expected type name");
+        return new Type(TypeKind.INT());
+    }
+
+    private Type parseType(boolean allowVoid) {
+        Type ty = this.parseBaseType(allowVoid);
+        while (!this.hadError && this.t0.kind == TokenKind.LBRACKET()) {
+            if (ty.kind == TypeKind.VOID()) {
+                this.errorAt(this.t0, "cannot create array of void");
+                return ty;
+            }
+            this.advanceTok();
+            this.expect(TokenKind.RBRACKET(), "expected ']' in array type");
+            ty = Type.makeArray(ty);
+        }
+        return ty;
+    }
+
+    /* =====================================================================
+     * Expressions
+     * ===================================================================== */
+
+    private ExprList parseArgList() {
+        ExprList args = new ExprList();
+        if (this.t0.kind != TokenKind.RPAREN()) {
+            args.add(this.parseExpr());
+            while (!this.hadError && this.match(TokenKind.COMMA())) {
+                args.add(this.parseExpr());
+            }
+        }
+        this.expect(TokenKind.RPAREN(), "expected ')' after argument list");
+        return args;
+    }
+
+    private Expr parsePrimary() {
+        Token tok = this.peek();
+        int k = tok.kind;
+        if (k == TokenKind.INT_LIT()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.INT_LIT(), tok.line, tok.col);
+            e.intVal = this.parseInt(tok.lexeme);
+            return e;
+        }
+        if (k == TokenKind.CHAR_LIT()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.CHAR_LIT(), tok.line, tok.col);
+            e.charVal = this.decodeCharLit(tok.lexeme);
+            return e;
+        }
+        if (k == TokenKind.KW_TRUE()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.BOOL_LIT(), tok.line, tok.col);
+            e.boolVal = true;
+            return e;
+        }
+        if (k == TokenKind.KW_FALSE()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.BOOL_LIT(), tok.line, tok.col);
+            e.boolVal = false;
+            return e;
+        }
+        if (k == TokenKind.STRING_LIT()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.STRING_LIT(), tok.line, tok.col);
+            e.strBytes = this.decodeStringLit(tok.lexeme);
+            return e;
+        }
+        if (k == TokenKind.KW_NULL()) {
+            this.advanceTok();
+            return new Expr(ExprKind.NULL(), tok.line, tok.col);
+        }
+        if (k == TokenKind.KW_THIS()) {
+            this.advanceTok();
+            return new Expr(ExprKind.THIS(), tok.line, tok.col);
+        }
+        if (k == TokenKind.IDENT()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.IDENT(), tok.line, tok.col);
+            e.name = tok.lexeme;
+            return e;
+        }
+        if (k == TokenKind.LPAREN()) {
+            this.advanceTok();
+            Expr e = this.parseExpr();
+            this.expect(TokenKind.RPAREN(), "expected ')' after expression");
+            return e;
+        }
+        if (k == TokenKind.KW_NEW()) {
+            this.advanceTok();
+            Type base = this.parseBaseType(false);
+            if (this.hadError) {
+                return new Expr(ExprKind.NULL(), tok.line, tok.col);
+            }
+            if (this.t0.kind == TokenKind.LPAREN()) {
+                if (base.kind != TypeKind.CLASS()) {
+                    this.errorAt(this.t0, "cannot instantiate primitive type with 'new(...)'");
+                    return new Expr(ExprKind.NULL(), tok.line, tok.col);
+                }
+                this.advanceTok();
+                Expr e = new Expr(ExprKind.NEW_OBJ(), tok.line, tok.col);
+                e.name = base.className;
+                e.args = this.parseArgList();
+                return e;
+            }
+            if (this.t0.kind == TokenKind.LBRACKET()) {
+                this.advanceTok();
+                Expr size = this.parseExpr();
+                this.expect(TokenKind.RBRACKET(), "expected ']' after array size");
+                Expr e = new Expr(ExprKind.NEW_ARRAY(), tok.line, tok.col);
+                e.elemType = base;
+                e.left = size;
+                return e;
+            }
+            this.errorAt(this.t0, "expected '(' or '[' after type in 'new' expression");
+            return new Expr(ExprKind.NULL(), tok.line, tok.col);
+        }
+        this.errorAt(tok, "expected expression");
+        return new Expr(ExprKind.NULL(), tok.line, tok.col);
+    }
+
+    private Expr parsePostfix() {
+        Expr expr = this.parsePrimary();
+        while (!this.hadError) {
+            Token tok = this.peek();
+            if (tok.kind == TokenKind.DOT()) {
+                this.advanceTok();
+                Token name = this.expect(TokenKind.IDENT(), "expected field or method name after '.'");
+                Expr f = new Expr(ExprKind.FIELD(), name.line, name.col);
+                f.left = expr;
+                f.name = name.lexeme;
+                expr = f;
+            } else if (tok.kind == TokenKind.LBRACKET()) {
+                this.advanceTok();
+                Expr idx = this.parseExpr();
+                this.expect(TokenKind.RBRACKET(), "expected ']' after array index");
+                Expr ix = new Expr(ExprKind.INDEX(), tok.line, tok.col);
+                ix.left = expr;
+                ix.right = idx;
+                expr = ix;
+            } else if (tok.kind == TokenKind.LPAREN()) {
+                this.advanceTok();
+                Expr call = new Expr(ExprKind.CALL(), tok.line, tok.col);
+                call.left = expr;
+                call.args = this.parseArgList();
+                expr = call;
+            } else if (tok.kind == TokenKind.PLUS_PLUS() || tok.kind == TokenKind.MINUS_MINUS()) {
+                this.advanceTok();
+                Expr u = new Expr(ExprKind.UNARY(), tok.line, tok.col);
+                if (tok.kind == TokenKind.PLUS_PLUS()) {
+                    u.op = UnaryOp.POST_INC();
+                } else {
+                    u.op = UnaryOp.POST_DEC();
+                }
+                u.left = expr;
+                expr = u;
+            } else {
+                break;
+            }
+        }
+        return expr;
+    }
+
+    private Expr parseUnary() {
+        Token tok = this.peek();
+        if (tok.kind == TokenKind.LPAREN() &&
+            (this.t1.kind == TokenKind.KW_INT() || this.t1.kind == TokenKind.KW_BYTE()) &&
+            this.t2.kind == TokenKind.RPAREN()) {
+            this.advanceTok(); /* '(' */
+            Type targetTy = this.parseBaseType(false);
+            this.expect(TokenKind.RPAREN(), "expected ')' in cast");
+            Expr e = new Expr(ExprKind.CAST(), tok.line, tok.col);
+            e.elemType = targetTy;
+            e.left = this.parseUnary();
+            return e;
+        }
+        if (tok.kind == TokenKind.MINUS() || tok.kind == TokenKind.BANG() ||
+            tok.kind == TokenKind.TILDE() || tok.kind == TokenKind.PLUS_PLUS() ||
+            tok.kind == TokenKind.MINUS_MINUS()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.UNARY(), tok.line, tok.col);
+            if (tok.kind == TokenKind.MINUS()) {
+                e.op = UnaryOp.NEG();
+            } else if (tok.kind == TokenKind.BANG()) {
+                e.op = UnaryOp.NOT();
+            } else if (tok.kind == TokenKind.TILDE()) {
+                e.op = UnaryOp.BIT_NOT();
+            } else if (tok.kind == TokenKind.PLUS_PLUS()) {
+                e.op = UnaryOp.PRE_INC();
+            } else {
+                e.op = UnaryOp.PRE_DEC();
+            }
+            e.left = this.parseUnary();
+            return e;
+        }
+        return this.parsePostfix();
+    }
+
+    private Expr makeBinary(Token tok, int op, Expr left, Expr right) {
+        Expr e = new Expr(ExprKind.BINARY(), tok.line, tok.col);
+        e.op = op;
+        e.left = left;
+        e.right = right;
+        return e;
+    }
+
+    private Expr parseMul() {
+        Expr left = this.parseUnary();
+        while (!this.hadError) {
+            Token tok = this.peek();
+            int op = -1;
+            if (tok.kind == TokenKind.STAR()) op = BinaryOp.MUL();
+            else if (tok.kind == TokenKind.SLASH()) op = BinaryOp.DIV();
+            else if (tok.kind == TokenKind.PERCENT()) op = BinaryOp.MOD();
+            if (op < 0) break;
+            this.advanceTok();
+            left = this.makeBinary(tok, op, left, this.parseUnary());
+        }
+        return left;
+    }
+
+    private Expr parseAdd() {
+        Expr left = this.parseMul();
+        while (!this.hadError) {
+            Token tok = this.peek();
+            int op = -1;
+            if (tok.kind == TokenKind.PLUS()) op = BinaryOp.ADD();
+            else if (tok.kind == TokenKind.MINUS()) op = BinaryOp.SUB();
+            if (op < 0) break;
+            this.advanceTok();
+            left = this.makeBinary(tok, op, left, this.parseMul());
+        }
+        return left;
+    }
+
+    private Expr parseShift() {
+        Expr left = this.parseAdd();
+        while (!this.hadError) {
+            Token tok = this.peek();
+            int op = -1;
+            if (tok.kind == TokenKind.SHL()) op = BinaryOp.SHL();
+            else if (tok.kind == TokenKind.SHR()) op = BinaryOp.SHR();
+            if (op < 0) break;
+            this.advanceTok();
+            left = this.makeBinary(tok, op, left, this.parseAdd());
+        }
+        return left;
+    }
+
+    private Expr parseRel() {
+        Expr left = this.parseShift();
+        while (!this.hadError) {
+            Token tok = this.peek();
+            int op = -1;
+            if (tok.kind == TokenKind.LT()) op = BinaryOp.LT();
+            else if (tok.kind == TokenKind.LE()) op = BinaryOp.LE();
+            else if (tok.kind == TokenKind.GT()) op = BinaryOp.GT();
+            else if (tok.kind == TokenKind.GE()) op = BinaryOp.GE();
+            if (op < 0) break;
+            this.advanceTok();
+            left = this.makeBinary(tok, op, left, this.parseShift());
+        }
+        return left;
+    }
+
+    private Expr parseEq() {
+        Expr left = this.parseRel();
+        while (!this.hadError) {
+            Token tok = this.peek();
+            int op = -1;
+            if (tok.kind == TokenKind.EQ()) op = BinaryOp.EQ();
+            else if (tok.kind == TokenKind.NEQ()) op = BinaryOp.NEQ();
+            if (op < 0) break;
+            this.advanceTok();
+            left = this.makeBinary(tok, op, left, this.parseRel());
+        }
+        return left;
+    }
+
+    private Expr parseBitAnd() {
+        Expr left = this.parseEq();
+        while (!this.hadError && this.t0.kind == TokenKind.AMP()) {
+            Token tok = this.advanceTok();
+            left = this.makeBinary(tok, BinaryOp.BIT_AND(), left, this.parseEq());
+        }
+        return left;
+    }
+
+    private Expr parseBitXor() {
+        Expr left = this.parseBitAnd();
+        while (!this.hadError && this.t0.kind == TokenKind.CARET()) {
+            Token tok = this.advanceTok();
+            left = this.makeBinary(tok, BinaryOp.BIT_XOR(), left, this.parseBitAnd());
+        }
+        return left;
+    }
+
+    private Expr parseBitOr() {
+        Expr left = this.parseBitXor();
+        while (!this.hadError && this.t0.kind == TokenKind.PIPE()) {
+            Token tok = this.advanceTok();
+            left = this.makeBinary(tok, BinaryOp.BIT_OR(), left, this.parseBitXor());
+        }
+        return left;
+    }
+
+    private Expr parseAnd() {
+        Expr left = this.parseBitOr();
+        while (!this.hadError && this.t0.kind == TokenKind.AND()) {
+            Token tok = this.advanceTok();
+            left = this.makeBinary(tok, BinaryOp.AND(), left, this.parseBitOr());
+        }
+        return left;
+    }
+
+    private Expr parseOr() {
+        Expr left = this.parseAnd();
+        while (!this.hadError && this.t0.kind == TokenKind.OR()) {
+            Token tok = this.advanceTok();
+            left = this.makeBinary(tok, BinaryOp.OR(), left, this.parseAnd());
+        }
+        return left;
+    }
+
+    private Expr parseAssign() {
+        Expr left = this.parseOr();
+        if (!this.hadError) {
+            int k = this.t0.kind;
+            if (k == TokenKind.ASSIGN()) {
+                Token tok = this.advanceTok();
+                if (left.kind != ExprKind.IDENT() &&
+                    left.kind != ExprKind.FIELD() &&
+                    left.kind != ExprKind.INDEX()) {
+                    this.errorAt(tok, "invalid assignment target");
+                    return left;
+                }
+                Expr right = this.parseAssign();
+                Expr e = new Expr(ExprKind.ASSIGN(), tok.line, tok.col);
+                e.left = left;
+                e.right = right;
+                return e;
+            }
+            int op = -1;
+            if (k == TokenKind.PLUS_ASSIGN()) op = BinaryOp.ADD();
+            else if (k == TokenKind.MINUS_ASSIGN()) op = BinaryOp.SUB();
+            else if (k == TokenKind.STAR_ASSIGN()) op = BinaryOp.MUL();
+            else if (k == TokenKind.SLASH_ASSIGN()) op = BinaryOp.DIV();
+            else if (k == TokenKind.PERCENT_ASSIGN()) op = BinaryOp.MOD();
+            if (op >= 0) {
+                Token tok = this.advanceTok();
+                if (left.kind != ExprKind.IDENT() &&
+                    left.kind != ExprKind.FIELD() &&
+                    left.kind != ExprKind.INDEX()) {
+                    this.errorAt(tok, "invalid assignment target");
+                    return left;
+                }
+                Expr right = this.parseAssign();
+                Expr e = new Expr(ExprKind.COMPOUND_ASSIGN(), tok.line, tok.col);
+                e.op = op;
+                e.left = left;
+                e.right = right;
+                return e;
+            }
+        }
+        return left;
+    }
+
+    private Expr parseExpr() {
+        return this.parseAssign();
+    }
+
+    /* =====================================================================
+     * Statements
+     * ===================================================================== */
+
+    private boolean isVarDeclStart() {
+        int k0 = this.t0.kind;
+        if (k0 == TokenKind.KW_INT() || k0 == TokenKind.KW_BYTE() || k0 == TokenKind.KW_BOOLEAN()) {
+            return true;
+        }
+        if (k0 == TokenKind.IDENT()) {
+            if (this.t1.kind == TokenKind.IDENT()) {
+                return true;
+            }
+            if (this.t1.kind == TokenKind.LBRACKET() && this.t2.kind == TokenKind.RBRACKET()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Stmt parseVarDecl() {
+        Token tok = this.peek();
+        Type ty = this.parseType(false);
+        Token name = this.expect(TokenKind.IDENT(), "expected variable name");
+        Expr init = null;
+        if (!this.hadError && this.match(TokenKind.ASSIGN())) {
+            init = this.parseExpr();
+        }
+        this.expect(TokenKind.SEMI(), "expected ';' after variable declaration");
+        Stmt s = new Stmt(StmtKind.VAR_DECL(), tok.line, tok.col);
+        s.varType = ty;
+        s.varName = name.lexeme;
+        s.expr = init;
+        return s;
+    }
+
+    private Stmt parseBlock() {
+        Token lbrace = this.expect(TokenKind.LBRACE(), "expected '{'");
+        StmtList stmts = new StmtList();
+        while (!this.hadError &&
+               this.t0.kind != TokenKind.RBRACE() &&
+               this.t0.kind != TokenKind.EOF()) {
+            stmts.add(this.parseStmt());
+        }
+        this.expect(TokenKind.RBRACE(), "expected '}'");
+        Stmt s = new Stmt(StmtKind.BLOCK(), lbrace.line, lbrace.col);
+        s.stmts = stmts;
+        return s;
+    }
+
+    private Stmt parseStmt() {
+        Token tok = this.peek();
+        if (tok.kind == TokenKind.LBRACE()) {
+            return this.parseBlock();
+        }
+        if (tok.kind == TokenKind.KW_IF()) {
+            this.advanceTok();
+            this.expect(TokenKind.LPAREN(), "expected '(' after 'if'");
+            Expr cond = this.parseExpr();
+            this.expect(TokenKind.RPAREN(), "expected ')' after 'if' condition");
+            Stmt thenB = this.parseStmt();
+            Stmt elseB = null;
+            if (!this.hadError && this.match(TokenKind.KW_ELSE())) {
+                elseB = this.parseStmt();
+            }
+            Stmt s = new Stmt(StmtKind.IF(), tok.line, tok.col);
+            s.expr = cond;
+            s.thenBranch = thenB;
+            s.elseBranch = elseB;
+            return s;
+        }
+        if (tok.kind == TokenKind.KW_WHILE()) {
+            this.advanceTok();
+            this.expect(TokenKind.LPAREN(), "expected '(' after 'while'");
+            Expr cond = this.parseExpr();
+            this.expect(TokenKind.RPAREN(), "expected ')' after 'while' condition");
+            Stmt body = this.parseStmt();
+            Stmt s = new Stmt(StmtKind.WHILE(), tok.line, tok.col);
+            s.expr = cond;
+            s.thenBranch = body;
+            return s;
+        }
+        if (tok.kind == TokenKind.KW_FOR()) {
+            this.advanceTok();
+            this.expect(TokenKind.LPAREN(), "expected '(' after 'for'");
+            Stmt initStmt = null;
+            if (this.t0.kind == TokenKind.SEMI()) {
+                this.advanceTok();
+            } else if (this.isVarDeclStart()) {
+                initStmt = this.parseVarDecl();
+            } else {
+                Token eTok = this.peek();
+                Expr initExpr = this.parseExpr();
+                this.expect(TokenKind.SEMI(), "expected ';' after 'for' initializer");
+                initStmt = new Stmt(StmtKind.EXPR(), eTok.line, eTok.col);
+                initStmt.expr = initExpr;
+            }
+            Expr cond = null;
+            if (!this.hadError && this.t0.kind != TokenKind.SEMI()) {
+                cond = this.parseExpr();
+            }
+            this.expect(TokenKind.SEMI(), "expected ';' after 'for' condition");
+            Expr step = null;
+            if (!this.hadError && this.t0.kind != TokenKind.RPAREN()) {
+                step = this.parseExpr();
+            }
+            this.expect(TokenKind.RPAREN(), "expected ')' after 'for' clauses");
+            Stmt body = this.parseStmt();
+            Stmt s = new Stmt(StmtKind.FOR(), tok.line, tok.col);
+            s.initStmt = initStmt;
+            s.expr = cond;
+            s.stepExpr = step;
+            s.thenBranch = body;
+            return s;
+        }
+        if (tok.kind == TokenKind.KW_SWITCH()) {
+            this.advanceTok();
+            this.expect(TokenKind.LPAREN(), "expected '(' after 'switch'");
+            Expr cond = this.parseExpr();
+            this.expect(TokenKind.RPAREN(), "expected ')' after 'switch' expression");
+            this.expect(TokenKind.LBRACE(), "expected '{' in 'switch'");
+            StmtList cases = new StmtList();
+            while (!this.hadError &&
+                   this.t0.kind != TokenKind.RBRACE() &&
+                   this.t0.kind != TokenKind.EOF()) {
+                Token cTok = this.peek();
+                if (cTok.kind == TokenKind.KW_CASE()) {
+                    this.advanceTok();
+                    Expr val = this.parseExpr();
+                    this.expect(TokenKind.COLON(), "expected ':' after 'case' value");
+                    Stmt cStmt = new Stmt(StmtKind.CASE(), cTok.line, cTok.col);
+                    cStmt.expr = val;
+                    cStmt.stmts = new StmtList();
+                    while (!this.hadError &&
+                           this.t0.kind != TokenKind.KW_CASE() &&
+                           this.t0.kind != TokenKind.KW_DEFAULT() &&
+                           this.t0.kind != TokenKind.RBRACE() &&
+                           this.t0.kind != TokenKind.EOF()) {
+                        cStmt.stmts.add(this.parseStmt());
+                    }
+                    cases.add(cStmt);
+                } else if (cTok.kind == TokenKind.KW_DEFAULT()) {
+                    this.advanceTok();
+                    this.expect(TokenKind.COLON(), "expected ':' after 'default'");
+                    Stmt dStmt = new Stmt(StmtKind.DEFAULT(), cTok.line, cTok.col);
+                    dStmt.stmts = new StmtList();
+                    while (!this.hadError &&
+                           this.t0.kind != TokenKind.KW_CASE() &&
+                           this.t0.kind != TokenKind.KW_DEFAULT() &&
+                           this.t0.kind != TokenKind.RBRACE() &&
+                           this.t0.kind != TokenKind.EOF()) {
+                        dStmt.stmts.add(this.parseStmt());
+                    }
+                    cases.add(dStmt);
+                } else {
+                    this.errorAt(cTok, "expected 'case' or 'default' in 'switch'");
+                    break;
+                }
+            }
+            this.expect(TokenKind.RBRACE(), "expected '}' at end of 'switch'");
+            Stmt sw = new Stmt(StmtKind.SWITCH(), tok.line, tok.col);
+            sw.expr = cond;
+            sw.stmts = cases;
+            return sw;
+        }
+        if (tok.kind == TokenKind.KW_BREAK()) {
+            this.advanceTok();
+            this.expect(TokenKind.SEMI(), "expected ';' after 'break'");
+            return new Stmt(StmtKind.BREAK(), tok.line, tok.col);
+        }
+        if (tok.kind == TokenKind.KW_CONTINUE()) {
+            this.advanceTok();
+            this.expect(TokenKind.SEMI(), "expected ';' after 'continue'");
+            return new Stmt(StmtKind.CONTINUE(), tok.line, tok.col);
+        }
+        if (tok.kind == TokenKind.KW_RETURN()) {
+            this.advanceTok();
+            Expr val = null;
+            if (!this.hadError && this.t0.kind != TokenKind.SEMI()) {
+                val = this.parseExpr();
+            }
+            this.expect(TokenKind.SEMI(), "expected ';' after 'return'");
+            Stmt s = new Stmt(StmtKind.RETURN(), tok.line, tok.col);
+            s.expr = val;
+            return s;
+        }
+        if (this.isVarDeclStart()) {
+            return this.parseVarDecl();
+        }
+        Expr expr = this.parseExpr();
+        this.expect(TokenKind.SEMI(), "expected ';' after expression");
+        Stmt s = new Stmt(StmtKind.EXPR(), tok.line, tok.col);
+        s.expr = expr;
+        return s;
+    }
+
+    /* =====================================================================
+     * Declarations
+     * ===================================================================== */
+
+    private ParamList parseParamList() {
+        this.expect(TokenKind.LPAREN(), "expected '('");
+        ParamList params = new ParamList();
+        if (!this.hadError && this.t0.kind != TokenKind.RPAREN()) {
+            Type pt = this.parseType(false);
+            Token pn = this.expect(TokenKind.IDENT(), "expected parameter name");
+            params.add(new Param(pt, pn.lexeme, pn.line, pn.col));
+            while (!this.hadError && this.match(TokenKind.COMMA())) {
+                pt = this.parseType(false);
+                pn = this.expect(TokenKind.IDENT(), "expected parameter name");
+                params.add(new Param(pt, pn.lexeme, pn.line, pn.col));
+            }
+        }
+        this.expect(TokenKind.RPAREN(), "expected ')' after parameter list");
+        return params;
+    }
+
+    private ClassDecl parseClass() {
+        if (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE()) {
+            this.advanceTok();
+        }
+        Token classKw = this.expect(TokenKind.KW_CLASS(), "expected 'class'");
+        Token nameTok = this.expect(TokenKind.IDENT(), "expected class name");
+        this.expect(TokenKind.LBRACE(), "expected '{' after class name");
+
+        ClassDecl cls = new ClassDecl(nameTok.lexeme, classKw.line, classKw.col);
+
+        while (!this.hadError &&
+               this.t0.kind != TokenKind.RBRACE() &&
+               this.t0.kind != TokenKind.EOF()) {
+            if (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE()) {
+                this.advanceTok();
+            }
+            boolean isStatic = this.match(TokenKind.KW_STATIC());
+            boolean isNative = this.match(TokenKind.KW_NATIVE());
+
+            if (!isStatic && !isNative &&
+                this.t0.kind == TokenKind.IDENT() &&
+                this.t0.equals(cls.name) &&
+                this.t1.kind == TokenKind.LPAREN()) {
+                Token ctorTok = this.advanceTok();
+                if (cls.constructor != null) {
+                    this.errorAt(ctorTok, "multiple constructors are not supported in Stage 0");
+                    break;
+                }
+                MethodDecl ctor = new MethodDecl(cls.name, new Type(TypeKind.VOID()),
+                                                 true, false, false, ctorTok.line, ctorTok.col);
+                ctor.owner = cls;
+                ctor.params = this.parseParamList();
+                ctor.body = this.parseBlock();
+                cls.constructor = ctor;
+                continue;
+            }
+
+            Type memberType = this.parseType(true);
+            Token memberName = this.expect(TokenKind.IDENT(), "expected field or method name");
+
+            if (!this.hadError && this.t0.kind == TokenKind.LPAREN()) {
+                if (isNative && !isStatic) {
+                    this.errorAt(memberName, "'native' methods must be 'static' in Stage 0");
+                    break;
+                }
+                MethodDecl m = new MethodDecl(memberName.lexeme, memberType, false,
+                                              isStatic, isNative, memberName.line, memberName.col);
+                m.owner = cls;
+                m.params = this.parseParamList();
+                if (isNative) {
+                    this.expect(TokenKind.SEMI(), "expected ';' after native method declaration");
+                    m.body = null;
+                } else {
+                    m.body = this.parseBlock();
+                }
+                cls.methods.add(m);
+            } else {
+                if (isNative) {
+                    this.errorAt(memberName, "fields cannot be 'native'");
+                    break;
+                }
+                if (memberType.kind == TypeKind.VOID()) {
+                    this.errorAt(memberName, "field cannot have type 'void'");
+                    break;
+                }
+                this.expect(TokenKind.SEMI(), "expected ';' after field declaration");
+                cls.fields.add(new FieldDecl(memberType, memberName.lexeme,
+                                             isStatic, memberName.line, memberName.col));
+            }
+        }
+
+        this.expect(TokenKind.RBRACE(), "expected '}' at end of class");
+        return cls;
+    }
+
+    public boolean parseClasses(ClassList out) {
+        while (!this.hadError && this.t0.kind != TokenKind.EOF()) {
+            out.add(this.parseClass());
+        }
+        return !this.hadError;
+    }
+}

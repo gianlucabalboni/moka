@@ -1,0 +1,41 @@
+class Main {
+    public static int main() {
+        if (Io.argc() < 2) {
+            Console.eprintln("Usage: word_count <file>");
+            return 1;
+        }
+
+        String path = Io.argv(1);
+        byte[] data = Io.readFileBytes(path);
+        if (data == null) {
+            Console.eprintln("Error: cannot read ".concat(path));
+            return 1;
+        }
+
+        int lines = 0;
+        int words = 0;
+        boolean inWord = false;
+        int i = 0;
+        while (i < data.length) {
+            byte c = data[i];
+            if (c == '\n') {
+                lines = lines + 1;
+            }
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                inWord = false;
+            } else {
+                if (!inWord) {
+                    words = words + 1;
+                    inWord = true;
+                }
+            }
+            i = i + 1;
+        }
+
+        Console.println("File:  ".concat(path));
+        Console.println("Lines: ".concat(String.fromInt(lines)));
+        Console.println("Words: ".concat(String.fromInt(words)));
+        Console.println("Bytes: ".concat(String.fromInt(data.length)));
+        return 0;
+    }
+}

@@ -1,0 +1,164 @@
+public class TokenKind {
+    public static int EOF()         { return 0; }
+    public static int ERROR()       { return 1; }
+    public static int IDENT()       { return 2; }
+    public static int INT_LIT()     { return 3; }
+    public static int CHAR_LIT()    { return 4; }
+    public static int STRING_LIT()  { return 5; }
+
+    public static int KW_CLASS()    { return 6; }
+    public static int KW_PUBLIC()   { return 7; }
+    public static int KW_PRIVATE()  { return 8; }
+    public static int KW_STATIC()   { return 9; }
+    public static int KW_NATIVE()   { return 10; }
+    public static int KW_VOID()     { return 11; }
+    public static int KW_INT()      { return 12; }
+    public static int KW_BYTE()     { return 13; }
+    public static int KW_BOOLEAN()  { return 14; }
+    public static int KW_TRUE()     { return 15; }
+    public static int KW_FALSE()    { return 16; }
+    public static int KW_NULL()     { return 17; }
+    public static int KW_THIS()     { return 18; }
+    public static int KW_NEW()      { return 19; }
+    public static int KW_IF()       { return 20; }
+    public static int KW_ELSE()     { return 21; }
+    public static int KW_WHILE()    { return 22; }
+    public static int KW_BREAK()    { return 23; }
+    public static int KW_CONTINUE() { return 24; }
+    public static int KW_RETURN()   { return 25; }
+    public static int KW_FOR()      { return 50; }
+    public static int KW_SWITCH()   { return 51; }
+    public static int KW_CASE()     { return 52; }
+    public static int KW_DEFAULT()  { return 53; }
+
+    public static int LPAREN()      { return 26; }
+    public static int RPAREN()      { return 27; }
+    public static int LBRACE()      { return 28; }
+    public static int RBRACE()      { return 29; }
+    public static int LBRACKET()    { return 30; }
+    public static int RBRACKET()    { return 31; }
+    public static int SEMI()        { return 32; }
+    public static int COMMA()       { return 33; }
+    public static int DOT()         { return 34; }
+    public static int COLON()       { return 54; }
+
+    public static int ASSIGN()      { return 35; }
+    public static int PLUS()        { return 36; }
+    public static int MINUS()       { return 37; }
+    public static int STAR()        { return 38; }
+    public static int SLASH()       { return 39; }
+    public static int PERCENT()     { return 40; }
+    public static int BANG()        { return 41; }
+    public static int EQ()          { return 42; }
+    public static int NEQ()         { return 43; }
+    public static int LT()          { return 44; }
+    public static int LE()          { return 45; }
+    public static int GT()          { return 46; }
+    public static int GE()          { return 47; }
+    public static int AND()         { return 48; }
+    public static int OR()          { return 49; }
+
+    public static int PLUS_PLUS()      { return 55; }
+    public static int MINUS_MINUS()    { return 56; }
+    public static int PLUS_ASSIGN()    { return 57; }
+    public static int MINUS_ASSIGN()   { return 58; }
+    public static int STAR_ASSIGN()    { return 59; }
+    public static int SLASH_ASSIGN()   { return 60; }
+    public static int PERCENT_ASSIGN() { return 61; }
+    public static int AMP()            { return 62; }
+    public static int PIPE()           { return 63; }
+    public static int CARET()          { return 64; }
+    public static int TILDE()          { return 65; }
+    public static int SHL()            { return 66; }
+    public static int SHR()            { return 67; }
+
+    public static String name(int k) {
+        if (k == 0)  return "EOF";
+        if (k == 1)  return "ERROR";
+        if (k == 2)  return "IDENT";
+        if (k == 3)  return "INT_LIT";
+        if (k == 4)  return "CHAR_LIT";
+        if (k == 5)  return "STRING_LIT";
+        if (k == 6)  return "class";
+        if (k == 7)  return "public";
+        if (k == 8)  return "private";
+        if (k == 9)  return "static";
+        if (k == 10) return "native";
+        if (k == 11) return "void";
+        if (k == 12) return "int";
+        if (k == 13) return "byte";
+        if (k == 14) return "boolean";
+        if (k == 15) return "true";
+        if (k == 16) return "false";
+        if (k == 17) return "null";
+        if (k == 18) return "this";
+        if (k == 19) return "new";
+        if (k == 20) return "if";
+        if (k == 21) return "else";
+        if (k == 22) return "while";
+        if (k == 23) return "break";
+        if (k == 24) return "continue";
+        if (k == 25) return "return";
+        if (k == 26) return "(";
+        if (k == 27) return ")";
+        if (k == 28) return "{";
+        if (k == 29) return "}";
+        if (k == 30) return "[";
+        if (k == 31) return "]";
+        if (k == 32) return ";";
+        if (k == 33) return ",";
+        if (k == 34) return ".";
+        if (k == 35) return "=";
+        if (k == 36) return "+";
+        if (k == 37) return "-";
+        if (k == 38) return "*";
+        if (k == 39) return "/";
+        if (k == 40) return "%";
+        if (k == 41) return "!";
+        if (k == 42) return "==";
+        if (k == 43) return "!=";
+        if (k == 44) return "<";
+        if (k == 45) return "<=";
+        if (k == 46) return ">";
+        if (k == 47) return ">=";
+        if (k == 48) return "&&";
+        if (k == 49) return "||";
+        if (k == 50) return "for";
+        if (k == 51) return "switch";
+        if (k == 52) return "case";
+        if (k == 53) return "default";
+        if (k == 54) return ":";
+        if (k == 55) return "++";
+        if (k == 56) return "--";
+        if (k == 57) return "+=";
+        if (k == 58) return "-=";
+        if (k == 59) return "*=";
+        if (k == 60) return "/=";
+        if (k == 61) return "%=";
+        if (k == 62) return "&";
+        if (k == 63) return "|";
+        if (k == 64) return "^";
+        if (k == 65) return "~";
+        if (k == 66) return "<<";
+        if (k == 67) return ">>";
+        return "UNKNOWN";
+    }
+}
+
+public class Token {
+    public int kind;
+    public String lexeme;
+    public int line;
+    public int col;
+
+    public Token(int kind, String lexeme, int line, int col) {
+        this.kind = kind;
+        this.lexeme = lexeme;
+        this.line = line;
+        this.col = col;
+    }
+
+    public boolean equals(String s) {
+        return this.lexeme.equals(s);
+    }
+}

@@ -1,0 +1,81 @@
+public class ByteBuffer {
+    private byte[] data;
+    private int len;
+
+    public ByteBuffer(int initialCap) {
+        if (initialCap < 16) {
+            initialCap = 16;
+        }
+        this.data = new byte[initialCap];
+        this.len = 0;
+    }
+
+    private void ensureCap(int needed) {
+        if (needed <= this.data.length) {
+            return;
+        }
+        int newCap = this.data.length * 2;
+        while (newCap < needed) {
+            newCap = newCap * 2;
+        }
+        byte[] next = new byte[newCap];
+        int i = 0;
+        while (i < this.len) {
+            next[i] = this.data[i];
+            i = i + 1;
+        }
+        this.data = next;
+    }
+
+    public int length() {
+        return this.len;
+    }
+
+    public byte byteAt(int i) {
+        return this.data[i];
+    }
+
+    public void appendByte(byte b) {
+        this.ensureCap(this.len + 1);
+        this.data[this.len] = b;
+        this.len = this.len + 1;
+    }
+
+    public void appendBytes(byte[] src) {
+        if (src == null) {
+            return;
+        }
+        int n = src.length;
+        this.ensureCap(this.len + n);
+        int i = 0;
+        while (i < n) {
+            this.data[this.len + i] = src[i];
+            i = i + 1;
+        }
+        this.len = this.len + n;
+    }
+
+    public void appendString(String s) {
+        if (s != null) {
+            this.appendBytes(s.bytes());
+        }
+    }
+
+    public void appendInt(int n) {
+        this.appendString(String.fromInt(n));
+    }
+
+    public byte[] toBytes() {
+        byte[] out = new byte[this.len];
+        int i = 0;
+        while (i < this.len) {
+            out[i] = this.data[i];
+            i = i + 1;
+        }
+        return out;
+    }
+
+    public String toString() {
+        return new String(this.toBytes());
+    }
+}

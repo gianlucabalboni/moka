@@ -1,0 +1,434 @@
+public class TypeKind {
+    public static int VOID()    { return 0; }
+    public static int INT()     { return 1; }
+    public static int BYTE()    { return 2; }
+    public static int BOOLEAN() { return 3; }
+    public static int CLASS()   { return 4; }
+    public static int ARRAY()   { return 5; }
+    public static int NULL()    { return 6; }
+}
+
+public class Type {
+    public int kind;
+    public String className;
+    public ClassDecl resolvedClass;
+    public Type elem;
+
+    public Type(int kind) {
+        this.kind = kind;
+    }
+
+    public static Type makeClass(String name) {
+        Type t = new Type(TypeKind.CLASS());
+        t.className = name;
+        return t;
+    }
+
+    public static Type makeResolvedClass(ClassDecl cls) {
+        Type t = new Type(TypeKind.CLASS());
+        t.className = cls.name;
+        t.resolvedClass = cls;
+        return t;
+    }
+
+    public static Type makeArray(Type elem) {
+        Type t = new Type(TypeKind.ARRAY());
+        t.elem = elem;
+        return t;
+    }
+}
+
+public class ExprKind {
+    public static int INT_LIT()    { return 0; }
+    public static int CHAR_LIT()   { return 1; }
+    public static int BOOL_LIT()   { return 2; }
+    public static int STRING_LIT() { return 3; }
+    public static int NULL()       { return 4; }
+    public static int THIS()       { return 5; }
+    public static int IDENT()      { return 6; }
+    public static int UNARY()      { return 7; }
+    public static int BINARY()     { return 8; }
+    public static int ASSIGN()     { return 9; }
+    public static int FIELD()      { return 10; }
+    public static int INDEX()      { return 11; }
+    public static int CALL()       { return 12; }
+    public static int NEW_OBJ()         { return 13; }
+    public static int NEW_ARRAY()       { return 14; }
+    public static int CAST()            { return 15; }
+    public static int COMPOUND_ASSIGN() { return 16; }
+}
+
+public class UnaryOp {
+    public static int NEG()      { return 0; }
+    public static int NOT()      { return 1; }
+    public static int BIT_NOT()  { return 2; }
+    public static int PRE_INC()  { return 3; }
+    public static int PRE_DEC()  { return 4; }
+    public static int POST_INC() { return 5; }
+    public static int POST_DEC() { return 6; }
+}
+
+public class BinaryOp {
+    public static int ADD()     { return 0; }
+    public static int SUB()     { return 1; }
+    public static int MUL()     { return 2; }
+    public static int DIV()     { return 3; }
+    public static int MOD()     { return 4; }
+    public static int EQ()      { return 5; }
+    public static int NEQ()     { return 6; }
+    public static int LT()      { return 7; }
+    public static int LE()      { return 8; }
+    public static int GT()      { return 9; }
+    public static int GE()      { return 10; }
+    public static int AND()     { return 11; }
+    public static int OR()      { return 12; }
+    public static int BIT_AND() { return 13; }
+    public static int BIT_OR()  { return 14; }
+    public static int BIT_XOR() { return 15; }
+    public static int SHL()     { return 16; }
+    public static int SHR()     { return 17; }
+}
+
+public class Expr {
+    public int kind;
+    public int line;
+    public int col;
+    public Type inferredType;
+
+    /* Literals */
+    public int intVal;
+    public byte charVal;
+    public boolean boolVal;
+    public byte[] strBytes;
+
+    /* Ident / Field / NewObj */
+    public String name;
+    public boolean isClassRef;
+    public boolean isArrayLength;
+
+    /* Unary / Binary / Assign */
+    public int op;
+    public Expr left;
+    public Expr right;
+
+    /* Call / NewObj / NewArray */
+    public ExprList args;
+    public MethodDecl resolvedMethod;
+    public ClassDecl resolvedClass;
+    public Type elemType;
+
+    public Expr(int kind, int line, int col) {
+        this.kind = kind;
+        this.line = line;
+        this.col = col;
+    }
+}
+
+public class ExprList {
+    private Expr[] items;
+    private int count;
+
+    public ExprList() {
+        this.items = new Expr[4];
+        this.count = 0;
+    }
+
+    public int size() {
+        return this.count;
+    }
+
+    public Expr get(int i) {
+        return this.items[i];
+    }
+
+    public void add(Expr item) {
+        if (this.count >= this.items.length) {
+            Expr[] next = new Expr[this.items.length * 2];
+            int i = 0;
+            while (i < this.count) {
+                next[i] = this.items[i];
+                i = i + 1;
+            }
+            this.items = next;
+        }
+        this.items[this.count] = item;
+        this.count = this.count + 1;
+    }
+}
+
+public class StmtKind {
+    public static int BLOCK()    { return 0; }
+    public static int VAR_DECL() { return 1; }
+    public static int IF()       { return 2; }
+    public static int WHILE()    { return 3; }
+    public static int BREAK()    { return 4; }
+    public static int CONTINUE() { return 5; }
+    public static int RETURN()   { return 6; }
+    public static int EXPR()     { return 7; }
+    public static int FOR()      { return 8; }
+    public static int SWITCH()   { return 9; }
+    public static int CASE()     { return 10; }
+    public static int DEFAULT()  { return 11; }
+}
+
+public class Stmt {
+    public int kind;
+    public int line;
+    public int col;
+
+    public StmtList stmts;
+    public Type varType;
+    public String varName;
+    public Expr expr;
+    public Stmt thenBranch;
+    public Stmt elseBranch;
+    public Stmt initStmt;
+    public Expr stepExpr;
+    public int intVal;
+
+    public Stmt(int kind, int line, int col) {
+        this.kind = kind;
+        this.line = line;
+        this.col = col;
+    }
+}
+
+public class StmtList {
+    private Stmt[] items;
+    private int count;
+
+    public StmtList() {
+        this.items = new Stmt[8];
+        this.count = 0;
+    }
+
+    public int size() {
+        return this.count;
+    }
+
+    public Stmt get(int i) {
+        return this.items[i];
+    }
+
+    public void add(Stmt item) {
+        if (this.count >= this.items.length) {
+            Stmt[] next = new Stmt[this.items.length * 2];
+            int i = 0;
+            while (i < this.count) {
+                next[i] = this.items[i];
+                i = i + 1;
+            }
+            this.items = next;
+        }
+        this.items[this.count] = item;
+        this.count = this.count + 1;
+    }
+}
+
+public class Param {
+    public Type type;
+    public String name;
+    public int line;
+    public int col;
+
+    public Param(Type type, String name, int line, int col) {
+        this.type = type;
+        this.name = name;
+        this.line = line;
+        this.col = col;
+    }
+}
+
+public class ParamList {
+    private Param[] items;
+    private int count;
+
+    public ParamList() {
+        this.items = new Param[4];
+        this.count = 0;
+    }
+
+    public int size() {
+        return this.count;
+    }
+
+    public Param get(int i) {
+        return this.items[i];
+    }
+
+    public void add(Param item) {
+        if (this.count >= this.items.length) {
+            Param[] next = new Param[this.items.length * 2];
+            int i = 0;
+            while (i < this.count) {
+                next[i] = this.items[i];
+                i = i + 1;
+            }
+            this.items = next;
+        }
+        this.items[this.count] = item;
+        this.count = this.count + 1;
+    }
+}
+
+public class FieldDecl {
+    public Type type;
+    public String name;
+    public boolean isStatic;
+    public int line;
+    public int col;
+
+    public FieldDecl(Type type, String name, boolean isStatic, int line, int col) {
+        this.type = type;
+        this.name = name;
+        this.isStatic = isStatic;
+        this.line = line;
+        this.col = col;
+    }
+}
+
+public class FieldList {
+    private FieldDecl[] items;
+    private int count;
+
+    public FieldList() {
+        this.items = new FieldDecl[8];
+        this.count = 0;
+    }
+
+    public int size() {
+        return this.count;
+    }
+
+    public FieldDecl get(int i) {
+        return this.items[i];
+    }
+
+    public void add(FieldDecl item) {
+        if (this.count >= this.items.length) {
+            FieldDecl[] next = new FieldDecl[this.items.length * 2];
+            int i = 0;
+            while (i < this.count) {
+                next[i] = this.items[i];
+                i = i + 1;
+            }
+            this.items = next;
+        }
+        this.items[this.count] = item;
+        this.count = this.count + 1;
+    }
+}
+
+public class MethodDecl {
+    public String name;
+    public Type returnType;
+    public boolean isConstructor;
+    public boolean isStatic;
+    public boolean isNative;
+    public ParamList params;
+    public Stmt body;
+    public ClassDecl owner;
+    public int line;
+    public int col;
+
+    public MethodDecl(String name, Type returnType, boolean isConstructor,
+                      boolean isStatic, boolean isNative, int line, int col) {
+        this.name = name;
+        this.returnType = returnType;
+        this.isConstructor = isConstructor;
+        this.isStatic = isStatic;
+        this.isNative = isNative;
+        this.params = new ParamList();
+        this.line = line;
+        this.col = col;
+    }
+}
+
+public class MethodList {
+    private MethodDecl[] items;
+    private int count;
+
+    public MethodList() {
+        this.items = new MethodDecl[8];
+        this.count = 0;
+    }
+
+    public int size() {
+        return this.count;
+    }
+
+    public MethodDecl get(int i) {
+        return this.items[i];
+    }
+
+    public void add(MethodDecl item) {
+        if (this.count >= this.items.length) {
+            MethodDecl[] next = new MethodDecl[this.items.length * 2];
+            int i = 0;
+            while (i < this.count) {
+                next[i] = this.items[i];
+                i = i + 1;
+            }
+            this.items = next;
+        }
+        this.items[this.count] = item;
+        this.count = this.count + 1;
+    }
+}
+
+public class ClassDecl {
+    public String name;
+    public FieldList fields;
+    public MethodDecl constructor;
+    public MethodList methods;
+    public int line;
+    public int col;
+
+    public ClassDecl(String name, int line, int col) {
+        this.name = name;
+        this.fields = new FieldList();
+        this.methods = new MethodList();
+        this.line = line;
+        this.col = col;
+    }
+}
+
+public class ClassList {
+    private ClassDecl[] items;
+    private int count;
+
+    public ClassList() {
+        this.items = new ClassDecl[8];
+        this.count = 0;
+    }
+
+    public int size() {
+        return this.count;
+    }
+
+    public ClassDecl get(int i) {
+        return this.items[i];
+    }
+
+    public void add(ClassDecl item) {
+        if (this.count >= this.items.length) {
+            ClassDecl[] next = new ClassDecl[this.items.length * 2];
+            int i = 0;
+            while (i < this.count) {
+                next[i] = this.items[i];
+                i = i + 1;
+            }
+            this.items = next;
+        }
+        this.items[this.count] = item;
+        this.count = this.count + 1;
+    }
+}
+
+public class Program {
+    public ClassList classes;
+
+    public Program() {
+        this.classes = new ClassList();
+    }
+}

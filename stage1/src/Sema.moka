@@ -1,0 +1,867 @@
+public class VarBinding {
+    public String name;
+    public Type type;
+
+    public VarBinding(String name, Type type) {
+        this.name = name;
+        this.type = type;
+    }
+}
+
+public class Scope {
+    public Scope parent;
+    private VarBinding[] vars;
+    private int count;
+
+    public Scope(Scope parent) {
+        this.parent = parent;
+        this.vars = new VarBinding[8];
+        this.count = 0;
+    }
+
+    public boolean hasLocal(String name) {
+        int i = 0;
+        while (i < this.count) {
+            if (this.vars[i].name.equals(name)) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    public void add(String name, Type type) {
+        if (this.count >= this.vars.length) {
+            VarBinding[] next = new VarBinding[this.vars.length * 2];
+            int i = 0;
+            while (i < this.count) {
+                next[i] = this.vars[i];
+                i = i + 1;
+            }
+            this.vars = next;
+        }
+        this.vars[this.count] = new VarBinding(name, type);
+        this.count = this.count + 1;
+    }
+
+    public Type lookup(String name) {
+        Scope sc = this;
+        while (sc != null) {
+            int i = 0;
+            while (i < sc.count) {
+                if (sc.vars[i].name.equals(name)) {
+                    return sc.vars[i].type;
+                }
+                i = i + 1;
+            }
+            sc = sc.parent;
+        }
+        return null;
+    }
+}
+
+public class Sema {
+    private Program prog;
+    private ClassDecl currentClass;
+    private MethodDecl currentMethod;
+    private Scope scope;
+    private int loopDepth;
+    private int breakDepth;
+    public boolean hadError;
+
+    private Type tyVoid;
+    private Type tyInt;
+    private Type tyByte;
+    private Type tyBoolean;
+    private Type tyNull;
+
+    public Sema(Program prog) {
+        this.prog = prog;
+        this.loopDepth = 0;
+        this.breakDepth = 0;
+        this.hadError = false;
+        this.tyVoid = new Type(TypeKind.VOID());
+        this.tyInt = new Type(TypeKind.INT());
+        this.tyByte = new Type(TypeKind.BYTE());
+        this.tyBoolean = new Type(TypeKind.BOOLEAN());
+        this.tyNull = new Type(TypeKind.NULL());
+    }
+
+    private void errorAt(int line, int col, String msg) {
+        if (this.hadError) {
+            return;
+        }
+        this.hadError = true;
+        Console.eprintln("line ".concat(String.fromInt(line))
+            .concat(":").concat(String.fromInt(col))
+            .concat(": semantic error: ").concat(msg));
+    }
+
+    private void pushScope() {
+        this.scope = new Scope(this.scope);
+    }
+
+    private void popScope() {
+        if (this.scope != null) {
+            this.scope = this.scope.parent;
+        }
+    }
+
+    private void scopeDeclare(String name, Type type, int line, int col) {
+        if (this.scope.hasLocal(name)) {
+            this.errorAt(line, col, "duplicate variable '".concat(name).concat("' in scope"));
+            return;
+        }
+        this.scope.add(name, type);
+    }
+
+    private ClassDecl findClass(String name) {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl c = this.prog.classes.get(i);
+            if (c.name.equals(name)) {
+                return c;
+            }
+            i = i + 1;
+        }
+        return null;
+    }
+
+    private FieldDecl findField(ClassDecl cls, String name) {
+        int i = 0;
+        while (i < cls.fields.size()) {
+            FieldDecl f = cls.fields.get(i);
+            if (f.name.equals(name)) {
+                return f;
+            }
+            i = i + 1;
+        }
+        return null;
+    }
+
+    private MethodDecl findMethod(ClassDecl cls, String name) {
+        int i = 0;
+        while (i < cls.methods.size()) {
+            MethodDecl m = cls.methods.get(i);
+            if (m.name.equals(name)) {
+                return m;
+            }
+            i = i + 1;
+        }
+        return null;
+    }
+
+    private boolean resolveType(Type ty, int line, int col) {
+        if (ty == null) {
+            return true;
+        }
+        if (ty.kind == TypeKind.CLASS()) {
+            if (ty.resolvedClass == null) {
+                ClassDecl cls = this.findClass(ty.className);
+                if (cls == null) {
+                    this.errorAt(line, col, "unknown type '".concat(ty.className).concat("'"));
+                    return false;
+                }
+                ty.resolvedClass = cls;
+            }
+        } else if (ty.kind == TypeKind.ARRAY()) {
+            return this.resolveType(ty.elem, line, col);
+        }
+        return true;
+    }
+
+    private boolean isNumeric(Type ty) {
+        return ty != null && (ty.kind == TypeKind.INT() || ty.kind == TypeKind.BYTE());
+    }
+
+    private boolean isRefType(Type ty) {
+        return ty != null && (ty.kind == TypeKind.CLASS() ||
+                              ty.kind == TypeKind.ARRAY() ||
+                              ty.kind == TypeKind.NULL());
+    }
+
+    private boolean typesEqual(Type a, Type b) {
+        if (a == null || b == null || a.kind != b.kind) {
+            return false;
+        }
+        if (a.kind == TypeKind.CLASS()) {
+            return a.resolvedClass == b.resolvedClass;
+        }
+        if (a.kind == TypeKind.ARRAY()) {
+            return this.typesEqual(a.elem, b.elem);
+        }
+        return true;
+    }
+
+    private boolean exprAssignable(Type target, Expr valExpr) {
+        Type val = valExpr.inferredType;
+        if (target == null || val == null) {
+            return false;
+        }
+        if (this.typesEqual(target, val)) {
+            return true;
+        }
+        if ((target.kind == TypeKind.INT() && val.kind == TypeKind.BYTE()) ||
+            (target.kind == TypeKind.BYTE() && val.kind == TypeKind.INT())) {
+            return true;
+        }
+        if (val.kind == TypeKind.NULL() &&
+            (target.kind == TypeKind.CLASS() || target.kind == TypeKind.ARRAY())) {
+            return true;
+        }
+        return false;
+    }
+
+    private String typeName(Type ty) {
+        if (ty == null) return "<unknown>";
+        if (ty.kind == TypeKind.VOID())    return "void";
+        if (ty.kind == TypeKind.INT())     return "int";
+        if (ty.kind == TypeKind.BYTE())    return "byte";
+        if (ty.kind == TypeKind.BOOLEAN()) return "boolean";
+        if (ty.kind == TypeKind.NULL())    return "null";
+        if (ty.kind == TypeKind.CLASS())   return ty.className;
+        if (ty.kind == TypeKind.ARRAY())   return "<array>";
+        return "<unknown>";
+    }
+
+    /* =====================================================================
+     * Pass 1: Register Classes & Signatures
+     * ===================================================================== */
+
+    private boolean pass1Register() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            int j = 0;
+            while (j < i) {
+                if (this.prog.classes.get(j).name.equals(cls.name)) {
+                    this.errorAt(cls.line, cls.col, "duplicate class '".concat(cls.name).concat("'"));
+                    return false;
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+
+        i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+
+            int f = 0;
+            while (f < cls.fields.size()) {
+                FieldDecl fld = cls.fields.get(f);
+                int prev = 0;
+                while (prev < f) {
+                    if (cls.fields.get(prev).name.equals(fld.name)) {
+                        this.errorAt(fld.line, fld.col,
+                            "duplicate field '".concat(fld.name).concat("' in class '").concat(cls.name).concat("'"));
+                        return false;
+                    }
+                    prev = prev + 1;
+                }
+                if (!this.resolveType(fld.type, fld.line, fld.col)) {
+                    return false;
+                }
+                f = f + 1;
+            }
+
+            if (cls.constructor != null) {
+                MethodDecl ctor = cls.constructor;
+                int p = 0;
+                while (p < ctor.params.size()) {
+                    Param pm = ctor.params.get(p);
+                    if (!this.resolveType(pm.type, pm.line, pm.col)) {
+                        return false;
+                    }
+                    p = p + 1;
+                }
+            }
+
+            int m = 0;
+            while (m < cls.methods.size()) {
+                MethodDecl meth = cls.methods.get(m);
+                int prev = 0;
+                while (prev < m) {
+                    if (cls.methods.get(prev).name.equals(meth.name)) {
+                        this.errorAt(meth.line, meth.col,
+                            "duplicate method '".concat(meth.name).concat("' in class '").concat(cls.name).concat("'"));
+                        return false;
+                    }
+                    prev = prev + 1;
+                }
+                if (!this.resolveType(meth.returnType, meth.line, meth.col)) {
+                    return false;
+                }
+                int p = 0;
+                while (p < meth.params.size()) {
+                    Param pm = meth.params.get(p);
+                    if (!this.resolveType(pm.type, pm.line, pm.col)) {
+                        return false;
+                    }
+                    p = p + 1;
+                }
+                m = m + 1;
+            }
+
+            i = i + 1;
+        }
+        return true;
+    }
+
+    /* =====================================================================
+     * Pass 2: Type-Check Expressions & Statements
+     * ===================================================================== */
+
+    private void checkArgs(String calleeName, MethodDecl target, ExprList args, int line, int col) {
+        int expected = 0;
+        if (target != null) {
+            expected = target.params.size();
+        }
+        if (args.size() != expected) {
+            this.errorAt(line, col, "'".concat(calleeName).concat("' expects ")
+                .concat(String.fromInt(expected)).concat(" argument(s), got ")
+                .concat(String.fromInt(args.size())));
+            return;
+        }
+        int i = 0;
+        while (i < args.size()) {
+            Expr a = args.get(i);
+            this.checkExpr(a);
+            if (this.hadError) return;
+            Type expectedTy = target.params.get(i).type;
+            if (!this.exprAssignable(expectedTy, a)) {
+                this.errorAt(a.line, a.col, "argument ".concat(String.fromInt(i + 1))
+                    .concat(" of '").concat(calleeName).concat("' has incompatible type '")
+                    .concat(this.typeName(a.inferredType)).concat("' (expected '")
+                    .concat(this.typeName(expectedTy)).concat("')"));
+                return;
+            }
+            i = i + 1;
+        }
+    }
+
+    private void checkExpr(Expr e) {
+        if (e == null || this.hadError) {
+            return;
+        }
+        int k = e.kind;
+        if (k == ExprKind.INT_LIT()) {
+            e.inferredType = this.tyInt;
+            return;
+        }
+        if (k == ExprKind.CHAR_LIT()) {
+            e.inferredType = this.tyByte;
+            return;
+        }
+        if (k == ExprKind.BOOL_LIT()) {
+            e.inferredType = this.tyBoolean;
+            return;
+        }
+        if (k == ExprKind.NULL()) {
+            e.inferredType = this.tyNull;
+            return;
+        }
+        if (k == ExprKind.STRING_LIT()) {
+            ClassDecl strCls = this.findClass("String");
+            if (strCls == null) {
+                this.errorAt(e.line, e.col, "'String' class is required to use string literals");
+                return;
+            }
+            e.inferredType = Type.makeResolvedClass(strCls);
+            return;
+        }
+        if (k == ExprKind.THIS()) {
+            if (this.currentMethod != null && this.currentMethod.isStatic) {
+                this.errorAt(e.line, e.col, "'this' cannot be used in a static method");
+                return;
+            }
+            e.inferredType = Type.makeResolvedClass(this.currentClass);
+            return;
+        }
+        if (k == ExprKind.IDENT()) {
+            Type local = this.scope.lookup(e.name);
+            if (local != null) {
+                e.inferredType = local;
+                return;
+            }
+            ClassDecl cls = this.findClass(e.name);
+            if (cls != null) {
+                e.isClassRef = true;
+                e.inferredType = Type.makeResolvedClass(cls);
+                return;
+            }
+            this.errorAt(e.line, e.col, "undeclared identifier '".concat(e.name).concat("'"));
+            return;
+        }
+        if (k == ExprKind.UNARY()) {
+            this.checkExpr(e.left);
+            if (this.hadError) return;
+            Type opTy = e.left.inferredType;
+            if (e.op == UnaryOp.NEG() || e.op == UnaryOp.BIT_NOT()) {
+                if (!this.isNumeric(opTy)) {
+                    this.errorAt(e.line, e.col, "unary operator requires numeric operand");
+                    return;
+                }
+                e.inferredType = this.tyInt;
+            } else if (e.op == UnaryOp.NOT()) {
+                if (opTy == null || opTy.kind != TypeKind.BOOLEAN()) {
+                    this.errorAt(e.line, e.col, "unary '!' requires boolean operand");
+                    return;
+                }
+                e.inferredType = this.tyBoolean;
+            } else {
+                /* ++ / -- */
+                Expr target = e.left;
+                if (target.kind != ExprKind.IDENT() &&
+                    target.kind != ExprKind.FIELD() &&
+                    target.kind != ExprKind.INDEX()) {
+                    this.errorAt(e.line, e.col, "increment/decrement requires assignable target");
+                    return;
+                }
+                if ((target.kind == ExprKind.IDENT() && target.isClassRef) ||
+                    (target.kind == ExprKind.FIELD() && target.isArrayLength)) {
+                    this.errorAt(e.line, e.col, "cannot modify read-only target");
+                    return;
+                }
+                if (!this.isNumeric(opTy)) {
+                    this.errorAt(e.line, e.col, "increment/decrement requires numeric operand");
+                    return;
+                }
+                e.inferredType = opTy;
+            }
+            return;
+        }
+        if (k == ExprKind.CAST()) {
+            this.checkExpr(e.left);
+            if (this.hadError) return;
+            if (!this.isNumeric(e.left.inferredType)) {
+                this.errorAt(e.line, e.col, "cast requires numeric operand");
+                return;
+            }
+            e.inferredType = e.elemType;
+            return;
+        }
+        if (k == ExprKind.COMPOUND_ASSIGN()) {
+            Expr target = e.left;
+            this.checkExpr(target);
+            this.checkExpr(e.right);
+            if (this.hadError) return;
+            if (target.kind == ExprKind.IDENT() && target.isClassRef) {
+                this.errorAt(target.line, target.col, "cannot assign to class name");
+                return;
+            }
+            if (target.kind == ExprKind.FIELD() && target.isArrayLength) {
+                this.errorAt(target.line, target.col, "array '.length' is read-only");
+                return;
+            }
+            if (!this.isNumeric(target.inferredType) || !this.isNumeric(e.right.inferredType)) {
+                this.errorAt(e.line, e.col, "compound assignment requires numeric operands");
+                return;
+            }
+            e.inferredType = target.inferredType;
+            return;
+        }
+        if (k == ExprKind.BINARY()) {
+            this.checkExpr(e.left);
+            this.checkExpr(e.right);
+            if (this.hadError) return;
+            Type lt = e.left.inferredType;
+            Type rt = e.right.inferredType;
+            int op = e.op;
+
+            if (op == BinaryOp.ADD() || op == BinaryOp.SUB() || op == BinaryOp.MUL() ||
+                op == BinaryOp.DIV() || op == BinaryOp.MOD() ||
+                op == BinaryOp.BIT_AND() || op == BinaryOp.BIT_OR() ||
+                op == BinaryOp.BIT_XOR() || op == BinaryOp.SHL() || op == BinaryOp.SHR()) {
+                if (!this.isNumeric(lt) || !this.isNumeric(rt)) {
+                    this.errorAt(e.line, e.col, "arithmetic/bitwise operator requires numeric operands");
+                    return;
+                }
+                e.inferredType = this.tyInt;
+            } else if (op == BinaryOp.LT() || op == BinaryOp.LE() ||
+                       op == BinaryOp.GT() || op == BinaryOp.GE()) {
+                if (!this.isNumeric(lt) || !this.isNumeric(rt)) {
+                    this.errorAt(e.line, e.col, "comparison operator requires numeric operands");
+                    return;
+                }
+                e.inferredType = this.tyBoolean;
+            } else if (op == BinaryOp.EQ() || op == BinaryOp.NEQ()) {
+                boolean ok = (this.isNumeric(lt) && this.isNumeric(rt)) ||
+                             (lt.kind == TypeKind.BOOLEAN() && rt.kind == TypeKind.BOOLEAN()) ||
+                             (this.isRefType(lt) && this.isRefType(rt) &&
+                              (this.typesEqual(lt, rt) || lt.kind == TypeKind.NULL() || rt.kind == TypeKind.NULL()));
+                if (!ok) {
+                    this.errorAt(e.line, e.col, "incompatible types for equality comparison");
+                    return;
+                }
+                e.inferredType = this.tyBoolean;
+            } else {
+                if (lt == null || rt == null ||
+                    lt.kind != TypeKind.BOOLEAN() || rt.kind != TypeKind.BOOLEAN()) {
+                    this.errorAt(e.line, e.col, "logical operator requires boolean operands");
+                    return;
+                }
+                e.inferredType = this.tyBoolean;
+            }
+            return;
+        }
+        if (k == ExprKind.ASSIGN()) {
+            Expr target = e.left;
+            this.checkExpr(target);
+            this.checkExpr(e.right);
+            if (this.hadError) return;
+            if (target.kind == ExprKind.IDENT() && target.isClassRef) {
+                this.errorAt(target.line, target.col, "cannot assign to class name");
+                return;
+            }
+            if (target.kind == ExprKind.FIELD() && target.isArrayLength) {
+                this.errorAt(target.line, target.col, "array '.length' is read-only");
+                return;
+            }
+            if (!this.exprAssignable(target.inferredType, e.right)) {
+                this.errorAt(e.line, e.col, "cannot assign '".concat(this.typeName(e.right.inferredType))
+                    .concat("' to '").concat(this.typeName(target.inferredType)).concat("'"));
+                return;
+            }
+            e.inferredType = target.inferredType;
+            return;
+        }
+        if (k == ExprKind.FIELD()) {
+            Expr obj = e.left;
+            this.checkExpr(obj);
+            if (this.hadError) return;
+            if (obj.kind == ExprKind.IDENT() && obj.isClassRef) {
+                this.errorAt(e.line, e.col, "cannot access field '".concat(e.name)
+                    .concat("' on class '").concat(obj.name).concat("' without an instance"));
+                return;
+            }
+            Type objTy = obj.inferredType;
+            if (objTy.kind == TypeKind.ARRAY()) {
+                if (e.name.equals("length")) {
+                    e.isArrayLength = true;
+                    e.inferredType = this.tyInt;
+                    return;
+                }
+                this.errorAt(e.line, e.col, "arrays only have '.length' property");
+                return;
+            }
+            if (objTy.kind == TypeKind.CLASS()) {
+                FieldDecl fld = this.findField(objTy.resolvedClass, e.name);
+                if (fld == null) {
+                    this.errorAt(e.line, e.col, "class '".concat(objTy.resolvedClass.name)
+                        .concat("' has no field '").concat(e.name).concat("'"));
+                    return;
+                }
+                e.inferredType = fld.type;
+                return;
+            }
+            this.errorAt(e.line, e.col, "cannot access field on non-object type");
+            return;
+        }
+        if (k == ExprKind.INDEX()) {
+            this.checkExpr(e.left);
+            this.checkExpr(e.right);
+            if (this.hadError) return;
+            Type arrTy = e.left.inferredType;
+            if (arrTy == null || arrTy.kind != TypeKind.ARRAY()) {
+                this.errorAt(e.line, e.col, "indexing requires an array");
+                return;
+            }
+            if (!this.isNumeric(e.right.inferredType)) {
+                this.errorAt(e.right.line, e.right.col, "array index must be an integer");
+                return;
+            }
+            e.inferredType = arrTy.elem;
+            return;
+        }
+        if (k == ExprKind.CALL()) {
+            Expr callee = e.left;
+            if (callee.kind == ExprKind.FIELD()) {
+                Expr obj = callee.left;
+                String mname = callee.name;
+                this.checkExpr(obj);
+                if (this.hadError) return;
+                if (obj.inferredType == null || obj.inferredType.kind != TypeKind.CLASS()) {
+                    this.errorAt(e.line, e.col, "method call target must be a class or instance");
+                    return;
+                }
+                ClassDecl cls = obj.inferredType.resolvedClass;
+                MethodDecl m = this.findMethod(cls, mname);
+                if (m == null) {
+                    this.errorAt(e.line, e.col, "class '".concat(cls.name)
+                        .concat("' has no method '").concat(mname).concat("'"));
+                    return;
+                }
+                boolean isClassCall = (obj.kind == ExprKind.IDENT() && obj.isClassRef);
+                if (isClassCall && !m.isStatic) {
+                    this.errorAt(e.line, e.col, "cannot call instance method '"
+                        .concat(cls.name).concat(".").concat(mname).concat("' in static context"));
+                    return;
+                }
+                if (!isClassCall && m.isStatic) {
+                    this.errorAt(e.line, e.col, "static method '"
+                        .concat(cls.name).concat(".").concat(mname)
+                        .concat("' must be called on the class name"));
+                    return;
+                }
+                this.checkArgs(mname, m, e.args, e.line, e.col);
+                e.resolvedMethod = m;
+                e.inferredType = m.returnType;
+                return;
+            }
+            if (callee.kind == ExprKind.IDENT()) {
+                String mname = callee.name;
+                MethodDecl m = this.findMethod(this.currentClass, mname);
+                if (m == null || !m.isStatic) {
+                    this.errorAt(e.line, e.col, "method '".concat(mname)
+                        .concat("' not found (use 'this.").concat(mname)
+                        .concat("()' for instance methods)"));
+                    return;
+                }
+                this.checkArgs(mname, m, e.args, e.line, e.col);
+                e.resolvedMethod = m;
+                e.inferredType = m.returnType;
+                return;
+            }
+            this.errorAt(e.line, e.col, "invalid call target");
+            return;
+        }
+        if (k == ExprKind.NEW_OBJ()) {
+            ClassDecl cls = this.findClass(e.name);
+            if (cls == null) {
+                this.errorAt(e.line, e.col, "unknown class '".concat(e.name).concat("'"));
+                return;
+            }
+            e.resolvedClass = cls;
+            this.checkArgs(cls.name, cls.constructor, e.args, e.line, e.col);
+            e.inferredType = Type.makeResolvedClass(cls);
+            return;
+        }
+        if (k == ExprKind.NEW_ARRAY()) {
+            if (!this.resolveType(e.elemType, e.line, e.col)) {
+                return;
+            }
+            this.checkExpr(e.left);
+            if (this.hadError) return;
+            if (!this.isNumeric(e.left.inferredType)) {
+                this.errorAt(e.left.line, e.left.col, "array size must be an integer");
+                return;
+            }
+            e.inferredType = Type.makeArray(e.elemType);
+            return;
+        }
+    }
+
+    private void checkStmt(Stmt st) {
+        if (st == null || this.hadError) {
+            return;
+        }
+        int k = st.kind;
+        if (k == StmtKind.BLOCK()) {
+            this.pushScope();
+            int i = 0;
+            while (i < st.stmts.size() && !this.hadError) {
+                this.checkStmt(st.stmts.get(i));
+                i = i + 1;
+            }
+            this.popScope();
+            return;
+        }
+        if (k == StmtKind.VAR_DECL()) {
+            if (!this.resolveType(st.varType, st.line, st.col)) {
+                return;
+            }
+            if (st.expr != null) {
+                this.checkExpr(st.expr);
+                if (this.hadError) return;
+                if (!this.exprAssignable(st.varType, st.expr)) {
+                    this.errorAt(st.line, st.col, "cannot initialize '".concat(st.varName)
+                        .concat("' of type '").concat(this.typeName(st.varType))
+                        .concat("' with '").concat(this.typeName(st.expr.inferredType)).concat("'"));
+                    return;
+                }
+            }
+            this.scopeDeclare(st.varName, st.varType, st.line, st.col);
+            return;
+        }
+        if (k == StmtKind.IF()) {
+            this.checkExpr(st.expr);
+            if (this.hadError) return;
+            if (st.expr.inferredType == null || st.expr.inferredType.kind != TypeKind.BOOLEAN()) {
+                this.errorAt(st.expr.line, st.expr.col, "'if' condition must be boolean");
+                return;
+            }
+            this.checkStmt(st.thenBranch);
+            if (st.elseBranch != null) {
+                this.checkStmt(st.elseBranch);
+            }
+            return;
+        }
+        if (k == StmtKind.WHILE()) {
+            this.checkExpr(st.expr);
+            if (this.hadError) return;
+            if (st.expr.inferredType == null || st.expr.inferredType.kind != TypeKind.BOOLEAN()) {
+                this.errorAt(st.expr.line, st.expr.col, "'while' condition must be boolean");
+                return;
+            }
+            this.loopDepth = this.loopDepth + 1;
+            this.breakDepth = this.breakDepth + 1;
+            this.checkStmt(st.thenBranch);
+            this.breakDepth = this.breakDepth - 1;
+            this.loopDepth = this.loopDepth - 1;
+            return;
+        }
+        if (k == StmtKind.FOR()) {
+            this.pushScope();
+            if (st.initStmt != null) {
+                this.checkStmt(st.initStmt);
+                if (this.hadError) {
+                    this.popScope();
+                    return;
+                }
+            }
+            if (st.expr != null) {
+                this.checkExpr(st.expr);
+                if (this.hadError) {
+                    this.popScope();
+                    return;
+                }
+                if (st.expr.inferredType == null || st.expr.inferredType.kind != TypeKind.BOOLEAN()) {
+                    this.errorAt(st.expr.line, st.expr.col, "'for' condition must be boolean");
+                    this.popScope();
+                    return;
+                }
+            }
+            if (st.stepExpr != null) {
+                this.checkExpr(st.stepExpr);
+                if (this.hadError) {
+                    this.popScope();
+                    return;
+                }
+            }
+            this.loopDepth = this.loopDepth + 1;
+            this.breakDepth = this.breakDepth + 1;
+            this.checkStmt(st.thenBranch);
+            this.breakDepth = this.breakDepth - 1;
+            this.loopDepth = this.loopDepth - 1;
+            this.popScope();
+            return;
+        }
+        if (k == StmtKind.SWITCH()) {
+            this.checkExpr(st.expr);
+            if (this.hadError) return;
+            if (!this.isNumeric(st.expr.inferredType)) {
+                this.errorAt(st.expr.line, st.expr.col, "'switch' expression must be int or byte");
+                return;
+            }
+            this.breakDepth = this.breakDepth + 1;
+            int i = 0;
+            while (i < st.stmts.size() && !this.hadError) {
+                Stmt c = st.stmts.get(i);
+                if (c.kind == StmtKind.CASE()) {
+                    Expr val = c.expr;
+                    if (val.kind == ExprKind.INT_LIT()) {
+                        c.intVal = val.intVal;
+                    } else if (val.kind == ExprKind.CHAR_LIT()) {
+                        c.intVal = val.charVal;
+                    } else if (val.kind == ExprKind.UNARY() &&
+                               val.op == UnaryOp.NEG() &&
+                               val.left.kind == ExprKind.INT_LIT()) {
+                        c.intVal = -val.left.intVal;
+                    } else {
+                        this.errorAt(val.line, val.col, "'case' label must be a constant integer or char");
+                        break;
+                    }
+                }
+                this.pushScope();
+                int j = 0;
+                while (j < c.stmts.size() && !this.hadError) {
+                    this.checkStmt(c.stmts.get(j));
+                    j = j + 1;
+                }
+                this.popScope();
+                i = i + 1;
+            }
+            this.breakDepth = this.breakDepth - 1;
+            return;
+        }
+        if (k == StmtKind.BREAK()) {
+            if (this.breakDepth <= 0) {
+                this.errorAt(st.line, st.col, "'break' outside of loop or switch");
+            }
+            return;
+        }
+        if (k == StmtKind.CONTINUE()) {
+            if (this.loopDepth <= 0) {
+                this.errorAt(st.line, st.col, "'continue' outside of loop");
+            }
+            return;
+        }
+        if (k == StmtKind.RETURN()) {
+            Type ret = this.currentMethod.returnType;
+            if (ret.kind == TypeKind.VOID()) {
+                if (st.expr != null) {
+                    this.errorAt(st.line, st.col, "void method/constructor cannot return a value");
+                }
+            } else {
+                if (st.expr == null) {
+                    this.errorAt(st.line, st.col, "non-void method must return a value");
+                    return;
+                }
+                this.checkExpr(st.expr);
+                if (this.hadError) return;
+                if (!this.exprAssignable(ret, st.expr)) {
+                    this.errorAt(st.line, st.col, "return value type '"
+                        .concat(this.typeName(st.expr.inferredType))
+                        .concat("' incompatible with '").concat(this.typeName(ret)).concat("'"));
+                }
+            }
+            return;
+        }
+        if (k == StmtKind.EXPR()) {
+            this.checkExpr(st.expr);
+            return;
+        }
+    }
+
+    private void checkMethod(ClassDecl cls, MethodDecl m) {
+        if (m.isNative || m.body == null) {
+            return;
+        }
+        this.currentClass = cls;
+        this.currentMethod = m;
+        this.pushScope();
+        int i = 0;
+        while (i < m.params.size() && !this.hadError) {
+            Param p = m.params.get(i);
+            this.scopeDeclare(p.name, p.type, p.line, p.col);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < m.body.stmts.size() && !this.hadError) {
+            this.checkStmt(m.body.stmts.get(i));
+            i = i + 1;
+        }
+        this.popScope();
+    }
+
+    public boolean analyze() {
+        if (!this.pass1Register()) {
+            return false;
+        }
+        int i = 0;
+        while (i < this.prog.classes.size() && !this.hadError) {
+            ClassDecl cls = this.prog.classes.get(i);
+            if (cls.constructor != null) {
+                this.checkMethod(cls, cls.constructor);
+            }
+            int m = 0;
+            while (m < cls.methods.size() && !this.hadError) {
+                this.checkMethod(cls, cls.methods.get(m));
+                m = m + 1;
+            }
+            i = i + 1;
+        }
+        return !this.hadError;
+    }
+}

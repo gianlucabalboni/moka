@@ -1,0 +1,83 @@
+class Main {
+    public static int main() {
+        /* 1. for loop + ++ + += + continue + break */
+        int sum = 0;
+        for (int i = 0; i < 10; i++) {
+            if (i == 2) {
+                continue;
+            }
+            if (i == 7) {
+                break;
+            }
+            sum += i;
+        }
+        /* 0 + 1 + 3 + 4 + 5 + 6 = 19 */
+        if (sum != 19) {
+            Console.eprintln("for/continue/break failed: ".concat(String.fromInt(sum)));
+            return 1;
+        }
+
+        /* 2. Prefix/postfix ++/-- and compound assignments */
+        int x = 10;
+        int a = x++;
+        int b = ++x;
+        if (a != 10 || b != 12 || x != 12) {
+            Console.eprintln("++/-- failed");
+            return 1;
+        }
+        x -= 2;
+        x *= 3;
+        x /= 5;
+        x %= 4;
+        if (x != 2) {
+            Console.eprintln("compound assign failed");
+            return 1;
+        }
+
+        /* 3. Bitwise & shifts */
+        int bits = (1 << 4) | (3 << 1); /* 16 | 6 = 22 */
+        bits = bits ^ 2;               /* 20 */
+        bits = (bits & 255) >> 1;      /* 10 */
+        if (bits != 10 || (~0) != -1) {
+            Console.eprintln("bitwise failed");
+            return 1;
+        }
+
+        /* 4. Explicit casts */
+        int big = 300;
+        byte low = (byte) big; /* 300 & 0xFF = 44 */
+        if ((int) low != 44) {
+            Console.eprintln("cast failed");
+            return 1;
+        }
+
+        /* 5. switch / case / default inside for */
+        int score = 0;
+        for (int k = 0; k < 4; k++) {
+            String tmp = "iter_".concat(String.fromInt(k));
+            switch (k) {
+                case 0:
+                    score += 1;
+                    break;
+                case 1:
+                    score += 10;
+                    break;
+                case 2:
+                    score += 100;
+                    break;
+                default:
+                    if (tmp.length() > 0) {
+                        score += 1000;
+                    }
+                    break;
+            }
+        }
+        if (score != 1111) {
+            Console.eprintln("switch failed: ".concat(String.fromInt(score)));
+            return 1;
+        }
+
+        Console.println("All Stage 1 feature tests passed!");
+        return 0;
+    }
+}

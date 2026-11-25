@@ -1,0 +1,31 @@
+class Main {
+    static native int rt_argc();
+    static native byte[] rt_argv_bytes(int index);
+
+    public static int main() {
+        String greeting = "Hello, ";
+        String target = "Moka!";
+        String full = greeting.concat(target);
+        Console.println(full);
+
+        String sub = full.substring(7, 11);
+        if (sub.equals("Moka")) {
+            Console.println("Substring check passed!");
+        } else {
+            Console.println("Substring check failed!");
+            return 1;
+        }
+
+        int i = 1;
+        int sum = 0;
+        while (i <= 10) {
+            sum = sum + i;
+            i = i + 1;
+        }
+        Console.println("Sum 1..10 = ".concat(String.fromInt(sum)));
+
+        int argc = Main.rt_argc();
+        Console.println("CLI args count = ".concat(String.fromInt(argc)));
+        return 0;
+    }
+}

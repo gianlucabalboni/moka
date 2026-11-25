@@ -1,0 +1,32 @@
+class Main {
+    public static int main() {
+        Console.println("Testing Console.println!");
+
+        ByteBuffer buf = new ByteBuffer(8);
+        buf.appendString("Value=");
+        buf.appendInt(42);
+        buf.appendByte('!');
+
+        String res = buf.toString();
+        if (!res.equals("Value=42!")) {
+            Console.eprintln("ByteBuffer test failed: ".concat(res));
+            return 1;
+        }
+        Console.println(res);
+
+        String path = "build/test_io.txt";
+        if (!Io.writeFileBytes(path, res.bytes())) {
+            Console.eprintln("Io.writeFileBytes failed");
+            return 1;
+        }
+        byte[] readBack = Io.readFileBytes(path);
+        if (readBack == null || !(new String(readBack)).equals(res)) {
+            Console.eprintln("Io.readFileBytes failed");
+            return 1;
+        }
+        Io.removeFile(path);
+
+        Console.println("All Stage 1 std tests passed!");
+        return 0;
+    }
+}

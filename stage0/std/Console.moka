@@ -1,0 +1,39 @@
+public class Console {
+    private static native void rt_print_bytes(byte[] b);
+    private static native void rt_println_bytes(byte[] b);
+    private static native void rt_eprint_bytes(byte[] b);
+    private static native void rt_print_int(int x);
+
+    public static void print(String s) {
+        if (s != null) {
+            Console.rt_print_bytes(s.bytes());
+        }
+    }
+
+    public static void println(String s) {
+        if (s == null) {
+            Console.rt_println_bytes("null".bytes());
+        } else {
+            Console.rt_println_bytes(s.bytes());
+        }
+    }
+
+    public static void eprint(String s) {
+        if (s != null) {
+            Console.rt_eprint_bytes(s.bytes());
+        }
+    }
+
+    public static void eprintln(String s) {
+        if (s == null) {
+            Console.rt_eprint_bytes("null\n".bytes());
+        } else {
+            Console.rt_eprint_bytes(s.bytes());
+            Console.rt_eprint_bytes("\n".bytes());
+        }
+    }
+
+    public static void printInt(int x) {
+        Console.rt_print_int(x);
+    }
+}

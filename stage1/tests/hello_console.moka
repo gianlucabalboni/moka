@@ -1,0 +1,8 @@
+class Main {
+    public static int main() {
+        Console.println("Hello from Stage 1 mokac!");
+        Console.print("2 + 3 = ");
+        Console.printInt(2 + 3);
+        return 0;
+    }
+}

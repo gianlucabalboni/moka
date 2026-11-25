@@ -1,0 +1,328 @@
+public class Lexer {
+    public String filename;
+    private byte[] src;
+    private int pos;
+    private int line;
+    private int col;
+
+    public Lexer(String filename, byte[] src) {
+        this.filename = filename;
+        this.src = src;
+        this.pos = 0;
+        this.line = 1;
+        this.col = 1;
+    }
+
+    private boolean isAtEnd() {
+        return this.pos >= this.src.length;
+    }
+
+    private byte peek() {
+        if (this.isAtEnd()) {
+            return 0;
+        }
+        return this.src[this.pos];
+    }
+
+    private byte peekNext() {
+        if (this.pos + 1 >= this.src.length) {
+            return 0;
+        }
+        return this.src[this.pos + 1];
+    }
+
+    private byte advance() {
+        byte c = this.src[this.pos];
+        this.pos = this.pos + 1;
+        if (c == '\n') {
+            this.line = this.line + 1;
+            this.col = 1;
+        } else {
+            this.col = this.col + 1;
+        }
+        return c;
+    }
+
+    private String slice(int start, int end) {
+        int len = end - start;
+        byte[] buf = new byte[len];
+        int i = 0;
+        while (i < len) {
+            buf[i] = this.src[start + i];
+            i = i + 1;
+        }
+        return new String(buf);
+    }
+
+    private boolean isAlpha(byte c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+    }
+
+    private boolean isDigit(byte c) {
+        return c >= '0' && c <= '9';
+    }
+
+    private boolean isAlnum(byte c) {
+        return this.isAlpha(c) || this.isDigit(c);
+    }
+
+    private boolean isValidEscape(byte c) {
+        return c == 'n' || c == 't' || c == 'r' || c == '0' ||
+               c == '\\' || c == '"' || c == '\'';
+    }
+
+    private int lookupKeyword(String s) {
+        if (s.equals("class"))    return TokenKind.KW_CLASS();
+        if (s.equals("public"))   return TokenKind.KW_PUBLIC();
+        if (s.equals("private"))  return TokenKind.KW_PRIVATE();
+        if (s.equals("static"))   return TokenKind.KW_STATIC();
+        if (s.equals("native"))   return TokenKind.KW_NATIVE();
+        if (s.equals("void"))     return TokenKind.KW_VOID();
+        if (s.equals("int"))      return TokenKind.KW_INT();
+        if (s.equals("byte"))     return TokenKind.KW_BYTE();
+        if (s.equals("boolean"))  return TokenKind.KW_BOOLEAN();
+        if (s.equals("true"))     return TokenKind.KW_TRUE();
+        if (s.equals("false"))    return TokenKind.KW_FALSE();
+        if (s.equals("null"))     return TokenKind.KW_NULL();
+        if (s.equals("this"))     return TokenKind.KW_THIS();
+        if (s.equals("new"))      return TokenKind.KW_NEW();
+        if (s.equals("if"))       return TokenKind.KW_IF();
+        if (s.equals("else"))     return TokenKind.KW_ELSE();
+        if (s.equals("while"))    return TokenKind.KW_WHILE();
+        if (s.equals("break"))    return TokenKind.KW_BREAK();
+        if (s.equals("continue")) return TokenKind.KW_CONTINUE();
+        if (s.equals("return"))   return TokenKind.KW_RETURN();
+        if (s.equals("for"))      return TokenKind.KW_FOR();
+        if (s.equals("switch"))   return TokenKind.KW_SWITCH();
+        if (s.equals("case"))     return TokenKind.KW_CASE();
+        if (s.equals("default"))  return TokenKind.KW_DEFAULT();
+        return TokenKind.IDENT();
+    }
+
+    private Token skipWhitespaceAndComments() {
+        while (true) {
+            byte c = this.peek();
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+                this.advance();
+            } else if (c == '/' && this.peekNext() == '/') {
+                while (!this.isAtEnd() && this.peek() != '\n') {
+                    this.advance();
+                }
+            } else if (c == '/' && this.peekNext() == '*') {
+                int sLine = this.line;
+                int sCol = this.col;
+                this.advance();
+                this.advance();
+                boolean closed = false;
+                while (!this.isAtEnd()) {
+                    if (this.peek() == '*' && this.peekNext() == '/') {
+                        this.advance();
+                        this.advance();
+                        closed = true;
+                        break;
+                    }
+                    this.advance();
+                }
+                if (!closed) {
+                    return new Token(TokenKind.ERROR(), "unterminated block comment", sLine, sCol);
+                }
+            } else {
+                return null;
+            }
+        }
+    }
+
+    private Token lexString(int startPos, int startLine, int startCol) {
+        while (!this.isAtEnd()) {
+            byte c = this.peek();
+            if (c == '"') {
+                this.advance();
+                return new Token(TokenKind.STRING_LIT(),
+                                 this.slice(startPos, this.pos), startLine, startCol);
+            }
+            if (c == '\n') {
+                return new Token(TokenKind.ERROR(), "unterminated string literal", startLine, startCol);
+            }
+            if (c == '\\') {
+                this.advance();
+                if (this.isAtEnd() || !this.isValidEscape(this.peek())) {
+                    return new Token(TokenKind.ERROR(),
+                                     "invalid escape sequence in string literal",
+                                     this.line, this.col);
+                }
+            }
+            this.advance();
+        }
+        return new Token(TokenKind.ERROR(), "unterminated string literal", startLine, startCol);
+    }
+
+    private Token lexChar(int startPos, int startLine, int startCol) {
+        if (this.isAtEnd() || this.peek() == '\n') {
+            return new Token(TokenKind.ERROR(), "unterminated character literal", startLine, startCol);
+        }
+        if (this.peek() == '\'') {
+            return new Token(TokenKind.ERROR(), "empty character literal", startLine, startCol);
+        }
+        byte c = this.advance();
+        if (c == '\\') {
+            if (this.isAtEnd() || !this.isValidEscape(this.peek())) {
+                return new Token(TokenKind.ERROR(),
+                                 "invalid escape sequence in character literal",
+                                 this.line, this.col);
+            }
+            this.advance();
+        }
+        if (this.isAtEnd() || this.peek() != '\'') {
+            return new Token(TokenKind.ERROR(), "unterminated character literal", startLine, startCol);
+        }
+        this.advance();
+        return new Token(TokenKind.CHAR_LIT(),
+                         this.slice(startPos, this.pos), startLine, startCol);
+    }
+
+    public Token next() {
+        Token err = this.skipWhitespaceAndComments();
+        if (err != null) {
+            return err;
+        }
+        if (this.isAtEnd()) {
+            return new Token(TokenKind.EOF(), "", this.line, this.col);
+        }
+
+        int startPos = this.pos;
+        int startLine = this.line;
+        int startCol = this.col;
+        byte c = this.advance();
+
+        if (this.isAlpha(c)) {
+            while (!this.isAtEnd() && this.isAlnum(this.peek())) {
+                this.advance();
+            }
+            String lex = this.slice(startPos, this.pos);
+            return new Token(this.lookupKeyword(lex), lex, startLine, startCol);
+        }
+        if (this.isDigit(c)) {
+            while (!this.isAtEnd() && this.isDigit(this.peek())) {
+                this.advance();
+            }
+            return new Token(TokenKind.INT_LIT(),
+                             this.slice(startPos, this.pos), startLine, startCol);
+        }
+        if (c == '"') {
+            return this.lexString(startPos, startLine, startCol);
+        }
+        if (c == '\'') {
+            return this.lexChar(startPos, startLine, startCol);
+        }
+
+        if (c == '(') return new Token(TokenKind.LPAREN(), "(", startLine, startCol);
+        if (c == ')') return new Token(TokenKind.RPAREN(), ")", startLine, startCol);
+        if (c == '{') return new Token(TokenKind.LBRACE(), "{", startLine, startCol);
+        if (c == '}') return new Token(TokenKind.RBRACE(), "}", startLine, startCol);
+        if (c == '[') return new Token(TokenKind.LBRACKET(), "[", startLine, startCol);
+        if (c == ']') return new Token(TokenKind.RBRACKET(), "]", startLine, startCol);
+        if (c == ';') return new Token(TokenKind.SEMI(), ";", startLine, startCol);
+        if (c == ':') return new Token(TokenKind.COLON(), ":", startLine, startCol);
+        if (c == ',') return new Token(TokenKind.COMMA(), ",", startLine, startCol);
+        if (c == '.') return new Token(TokenKind.DOT(), ".", startLine, startCol);
+        if (c == '^') return new Token(TokenKind.CARET(), "^", startLine, startCol);
+        if (c == '~') return new Token(TokenKind.TILDE(), "~", startLine, startCol);
+
+        if (c == '+') {
+            if (this.peek() == '+') {
+                this.advance();
+                return new Token(TokenKind.PLUS_PLUS(), "++", startLine, startCol);
+            }
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.PLUS_ASSIGN(), "+=", startLine, startCol);
+            }
+            return new Token(TokenKind.PLUS(), "+", startLine, startCol);
+        }
+        if (c == '-') {
+            if (this.peek() == '-') {
+                this.advance();
+                return new Token(TokenKind.MINUS_MINUS(), "--", startLine, startCol);
+            }
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.MINUS_ASSIGN(), "-=", startLine, startCol);
+            }
+            return new Token(TokenKind.MINUS(), "-", startLine, startCol);
+        }
+        if (c == '*') {
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.STAR_ASSIGN(), "*=", startLine, startCol);
+            }
+            return new Token(TokenKind.STAR(), "*", startLine, startCol);
+        }
+        if (c == '/') {
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.SLASH_ASSIGN(), "/=", startLine, startCol);
+            }
+            return new Token(TokenKind.SLASH(), "/", startLine, startCol);
+        }
+        if (c == '%') {
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.PERCENT_ASSIGN(), "%=", startLine, startCol);
+            }
+            return new Token(TokenKind.PERCENT(), "%", startLine, startCol);
+        }
+
+        if (c == '=') {
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.EQ(), "==", startLine, startCol);
+            }
+            return new Token(TokenKind.ASSIGN(), "=", startLine, startCol);
+        }
+        if (c == '!') {
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.NEQ(), "!=", startLine, startCol);
+            }
+            return new Token(TokenKind.BANG(), "!", startLine, startCol);
+        }
+        if (c == '<') {
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.LE(), "<=", startLine, startCol);
+            }
+            if (this.peek() == '<') {
+                this.advance();
+                return new Token(TokenKind.SHL(), "<<", startLine, startCol);
+            }
+            return new Token(TokenKind.LT(), "<", startLine, startCol);
+        }
+        if (c == '>') {
+            if (this.peek() == '=') {
+                this.advance();
+                return new Token(TokenKind.GE(), ">=", startLine, startCol);
+            }
+            if (this.peek() == '>') {
+                this.advance();
+                return new Token(TokenKind.SHR(), ">>", startLine, startCol);
+            }
+            return new Token(TokenKind.GT(), ">", startLine, startCol);
+        }
+        if (c == '&') {
+            if (this.peek() == '&') {
+                this.advance();
+                return new Token(TokenKind.AND(), "&&", startLine, startCol);
+            }
+            return new Token(TokenKind.AMP(), "&", startLine, startCol);
+        }
+        if (c == '|') {
+            if (this.peek() == '|') {
+                this.advance();
+                return new Token(TokenKind.OR(), "||", startLine, startCol);
+            }
+            return new Token(TokenKind.PIPE(), "|", startLine, startCol);
+        }
+
+        return new Token(TokenKind.ERROR(), "unexpected character", startLine, startCol);
+    }
+}

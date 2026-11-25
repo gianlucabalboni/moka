@@ -1,0 +1,49 @@
+public class Io {
+    private static native int rt_argc();
+    private static native byte[] rt_argv_bytes(int index);
+    private static native byte[] rt_read_file_bytes(byte[] path);
+    private static native boolean rt_write_file_bytes(byte[] path, byte[] data);
+    private static native boolean rt_remove_file(byte[] path);
+    private static native int rt_system(byte[] cmd);
+    private static native void rt_exit(int code);
+
+    public static int argc() {
+        return Io.rt_argc();
+    }
+
+    public static String argv(int index) {
+        return new String(Io.rt_argv_bytes(index));
+    }
+
+    public static byte[] readFileBytes(String path) {
+        if (path == null) {
+            return null;
+        }
+        return Io.rt_read_file_bytes(path.bytes());
+    }
+
+    public static boolean writeFileBytes(String path, byte[] data) {
+        if (path == null || data == null) {
+            return false;
+        }
+        return Io.rt_write_file_bytes(path.bytes(), data);
+    }
+
+    public static boolean removeFile(String path) {
+        if (path == null) {
+            return false;
+        }
+        return Io.rt_remove_file(path.bytes());
+    }
+
+    public static int exec(String cmd) {
+        if (cmd == null) {
+            return 1;
+        }
+        return Io.rt_system(cmd.bytes());
+    }
+
+    public static void exit(int code) {
+        Io.rt_exit(code);
+    }
+}
