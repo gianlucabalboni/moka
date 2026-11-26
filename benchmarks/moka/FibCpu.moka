@@ -1,0 +1,14 @@
+class Main {
+    public static int fib(int n) {
+        if (n <= 1) {
+            return n;
+        }
+        return Main.fib(n - 1) + Main.fib(n - 2);
+    }
+
+    public static int main() {
+        int res = Main.fib(42);
+        Console.println("fib(42)=" + res);
+        return 0;
+    }
+}
