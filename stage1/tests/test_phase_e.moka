@@ -1,0 +1,125 @@
+class SharedCounter {
+    public int value;
+
+    public SharedCounter() {
+        this.value = 0;
+    }
+
+    public synchronized void incMethod() {
+        this.value = this.value + 1;
+    }
+}
+
+class SyncWorker implements Runnable {
+    private SharedCounter counter;
+    private int iters;
+
+    public SyncWorker(SharedCounter counter, int iters) {
+        this.counter = counter;
+        this.iters = iters;
+    }
+
+    public void run() {
+        for (int i = 0; i < this.iters; i++) {
+            if (i % 2 == 0) {
+                this.counter.incMethod();
+            } else {
+                synchronized (this.counter) {
+                    this.counter.value = this.counter.value + 1;
+                }
+            }
+            // Allocate temporary objects to exercise STW GC across threads
+            String junk = "w_" + i;
+            if (junk.length() == 0) {
+                Console.println(junk);
+            }
+        }
+    }
+}
+
+class MutexWorker extends Thread {
+    private Mutex mtx;
+    private int[] box;
+    private int iters;
+
+    public MutexWorker(Mutex mtx, int[] box, int iters) {
+        super();
+        this.mtx = mtx;
+        this.box = box;
+        this.iters = iters;
+    }
+
+    public void run() {
+        for (int i = 0; i < this.iters; i++) {
+            this.mtx.lock();
+            this.box[0] = this.box[0] + 1;
+            this.mtx.unlock();
+        }
+    }
+}
+
+class Sleeper implements Runnable {
+    public boolean done;
+
+    public Sleeper() {
+        this.done = false;
+    }
+
+    public void run() {
+        Thread.sleep(10);
+        this.done = true;
+    }
+}
+
+class Main {
+    public static int main() {
+        // 1. 4 threads sharing SharedCounter with synchronized method & block + STW GC
+        SharedCounter counter = new SharedCounter();
+        Thread[] threads = new Thread[4];
+        for (int i = 0; i < 4; i++) {
+            threads[i] = new Thread(new SyncWorker(counter, 2000));
+            threads[i].start();
+        }
+        for (int i = 0; i < 4; i++) {
+            threads[i].join();
+        }
+        if (counter.value != 8000) {
+            Console.eprintln("synchronized counter failed: " + counter.value);
+            return 1;
+        }
+
+        // 2. Subclassing Thread directly + Mutex
+        Mutex mtx = new Mutex();
+        int[] box = new int[1];
+        MutexWorker w1 = new MutexWorker(mtx, box, 3000);
+        MutexWorker w2 = new MutexWorker(mtx, box, 3000);
+        w1.start();
+        w2.start();
+        w1.join();
+        w2.join();
+        if (box[0] != 6000) {
+            Console.eprintln("Mutex counter failed: " + box[0]);
+            return 1;
+        }
+
+        // 3. Thread.sleep while main allocates & triggers STW GC
+        Sleeper sl = new Sleeper();
+        Thread st = new Thread(sl);
+        st.start();
+        for (int g = 0; g < 1500; g++) {
+            String tmp = "gc_" + g;
+            if (tmp.length() == 0) {
+                Console.println(tmp);
+            }
+        }
+        st.join();
+        if (!sl.done) {
+            Console.eprintln("Sleeper thread did not finish");
+            return 1;
+        }
+
+        Console.println("Phase E sync=" + counter.value + " mutex=" + box[0]);
+        Console.println("All Stage 1 Phase E (Concurrency & STW GC) tests passed!");
+        return 0;
+    }
+}

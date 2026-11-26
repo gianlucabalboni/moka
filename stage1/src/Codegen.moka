@@ -19,6 +19,7 @@ public class Codegen {
     private int excDepth;
     private String[] excFrameNames;
     private Stmt[] excFinallyBlocks;
+    private String[] excSyncObjs;
 
     public Codegen(Program prog) {
         this.prog = prog;
@@ -36,6 +37,7 @@ public class Codegen {
         this.excDepth = 0;
         this.excFrameNames = new String[64];
         this.excFinallyBlocks = new Stmt[64];
+        this.excSyncObjs = new String[64];
     }
 
     private boolean isRefType(Type ty) {
@@ -95,6 +97,9 @@ public class Codegen {
             }
             return total;
         }
+        if (k == StmtKind.SYNCHRONIZED()) {
+            return this.countRefVars(st.thenBranch);
+        }
         return 0;
     }
 
@@ -105,6 +110,12 @@ public class Codegen {
             this.out.appendString("rt_exc_top = ");
             this.out.appendString(this.excFrameNames[i]);
             this.out.appendString(".prev;\n");
+            if (this.excSyncObjs[i] != null) {
+                this.emitIndent();
+                this.out.appendString("rt_monitor_exit(");
+                this.out.appendString(this.excSyncObjs[i]);
+                this.out.appendString(");\n");
+            }
             if (this.excFinallyBlocks[i] != null) {
                 int savedDepth = this.excDepth;
                 this.excDepth = i;
@@ -252,15 +263,27 @@ public class Codegen {
             }
             if (e.inferredType != null && e.inferredType.kind == TypeKind.CLASS() &&
                 e.inferredType.resolvedClass != targetType.resolvedClass) {
-                this.out.appendString("((");
-                this.out.appendString(iname);
-                this.out.appendString("){ (void*)(");
-                this.emitExpr(e);
-                this.out.appendString("), &");
-                this.out.appendString(e.inferredType.resolvedClass.name);
-                this.out.appendByte('_');
-                this.out.appendString(iname);
-                this.out.appendString("_vtable })");
+                if (e.kind == ExprKind.NEW_OBJ() || e.inferredType.resolvedClass.isFinal) {
+                    this.out.appendString("((");
+                    this.out.appendString(iname);
+                    this.out.appendString("){ (void*)(");
+                    this.emitExpr(e);
+                    this.out.appendString("), &");
+                    this.out.appendString(e.inferredType.resolvedClass.name);
+                    this.out.appendByte('_');
+                    this.out.appendString(iname);
+                    this.out.appendString("_vtable })");
+                } else if (e.inferredType.resolvedClass.isInterface) {
+                    this.out.appendString(iname);
+                    this.out.appendString("__cast_from((");
+                    this.emitExpr(e);
+                    this.out.appendString(").obj)");
+                } else {
+                    this.out.appendString(iname);
+                    this.out.appendString("__cast_from((void*)(");
+                    this.emitExpr(e);
+                    this.out.appendString("))");
+                }
                 return;
             }
             this.emitExpr(e);
@@ -1043,6 +1066,7 @@ public class Codegen {
 
                 this.excFrameNames[this.excDepth] = finName;
                 this.excFinallyBlocks[this.excDepth] = st.elseBranch;
+                this.excSyncObjs[this.excDepth] = null;
                 this.excDepth = this.excDepth + 1;
             }
 
@@ -1063,6 +1087,7 @@ public class Codegen {
 
                 this.excFrameNames[this.excDepth] = efName;
                 this.excFinallyBlocks[this.excDepth] = null;
+                this.excSyncObjs[this.excDepth] = null;
                 this.excDepth = this.excDepth + 1;
 
                 this.emitStmt(st.thenBranch);
@@ -1192,6 +1217,110 @@ public class Codegen {
                 this.emitIndent();
                 this.out.appendString("}\n");
             }
+
+            this.indent = this.indent - 1;
+            this.emitIndent();
+            this.out.appendString("}\n");
+            return;
+        }
+        if (k == StmtKind.SYNCHRONIZED()) {
+            int id = this.excCounter;
+            this.excCounter = this.excCounter + 1;
+            String objVar = "_sync_obj_".concat(String.fromInt(id));
+            String efName = "_sync_ef_".concat(String.fromInt(id));
+
+            this.emitIndent();
+            this.out.appendString("{\n");
+            this.indent = this.indent + 1;
+
+            this.emitIndent();
+            this.out.appendString("void* ");
+            this.out.appendString(objVar);
+            this.out.appendString(" = ");
+            if (this.isInterfaceType(st.expr.inferredType)) {
+                this.out.appendByte('(');
+                this.emitExpr(st.expr);
+                this.out.appendString(").obj;\n");
+            } else {
+                this.out.appendString("(void*)(");
+                this.emitExpr(st.expr);
+                this.out.appendString(");\n");
+            }
+            this.emitIndent();
+            this.out.appendString("rt_monitor_enter(");
+            this.out.appendString(objVar);
+            this.out.appendString(");\n");
+            this.emitIndent();
+            this.out.appendString("void* _sync_exc_");
+            this.out.appendInt(id);
+            this.out.appendString(" = NULL;\n");
+            this.emitIndent();
+            this.out.appendString("bool _sync_rethrow_");
+            this.out.appendInt(id);
+            this.out.appendString(" = false;\n");
+            this.emitIndent();
+            this.out.appendString("RtExceptionFrame ");
+            this.out.appendString(efName);
+            this.out.appendString(" = { .prev = rt_exc_top, .saved_shadow_stack = rt_shadow_stack, .exception = NULL };\n");
+            this.emitIndent();
+            this.out.appendString("rt_exc_top = &");
+            this.out.appendString(efName);
+            this.out.appendString(";\n");
+            this.emitIndent();
+            this.out.appendString("if (setjmp(");
+            this.out.appendString(efName);
+            this.out.appendString(".env) == 0) {\n");
+            this.indent = this.indent + 1;
+
+            this.excFrameNames[this.excDepth] = efName;
+            this.excFinallyBlocks[this.excDepth] = null;
+            this.excSyncObjs[this.excDepth] = objVar;
+            this.excDepth = this.excDepth + 1;
+
+            this.emitStmt(st.thenBranch);
+
+            this.excDepth = this.excDepth - 1;
+            this.emitIndent();
+            this.out.appendString("rt_exc_top = ");
+            this.out.appendString(efName);
+            this.out.appendString(".prev;\n");
+            this.indent = this.indent - 1;
+            this.emitIndent();
+            this.out.appendString("} else {\n");
+            this.indent = this.indent + 1;
+            this.emitIndent();
+            this.out.appendString("rt_exc_top = ");
+            this.out.appendString(efName);
+            this.out.appendString(".prev;\n");
+            this.emitIndent();
+            this.out.appendString("_sync_exc_");
+            this.out.appendInt(id);
+            this.out.appendString(" = ");
+            this.out.appendString(efName);
+            this.out.appendString(".exception;\n");
+            this.emitIndent();
+            this.out.appendString("_sync_rethrow_");
+            this.out.appendInt(id);
+            this.out.appendString(" = true;\n");
+            this.indent = this.indent - 1;
+            this.emitIndent();
+            this.out.appendString("}\n");
+            this.emitIndent();
+            this.out.appendString("rt_monitor_exit(");
+            this.out.appendString(objVar);
+            this.out.appendString(");\n");
+            this.emitIndent();
+            this.out.appendString("if (_sync_rethrow_");
+            this.out.appendInt(id);
+            this.out.appendString(") {\n");
+            this.indent = this.indent + 1;
+            this.emitIndent();
+            this.out.appendString("rt_throw(_sync_exc_");
+            this.out.appendInt(id);
+            this.out.appendString(");\n");
+            this.indent = this.indent - 1;
+            this.emitIndent();
+            this.out.appendString("}\n");
 
             this.indent = this.indent - 1;
             this.emitIndent();
@@ -1588,7 +1717,7 @@ public class Codegen {
             i = 0;
             while (i < this.prog.classes.size()) {
                 ClassDecl cls = this.prog.classes.get(i);
-                if (cls.isInterface || cls.isGenericTemplate || this.classDepth(cls) != depth) {
+                if (cls.isInterface || cls.isGenericTemplate || cls.isStatic || this.classDepth(cls) != depth) {
                     i = i + 1;
                     continue;
                 }
@@ -1950,6 +2079,11 @@ public class Codegen {
 
         /* 1b. Interface fat-pointer types & dispatchers */
         this.emitInterfaceTypes();
+        if (this.hasClass("Runnable")) {
+            this.out.appendString("static inline int64_t rt_thread_spawn(Runnable r) {\n");
+            this.out.appendString("    return rt_thread_spawn_raw(r.obj, r.vtable->run);\n");
+            this.out.appendString("}\n\n");
+        }
 
         /* 2. Struct definitions (ordered by inheritance depth) */
         int maxDepth = 0;
@@ -2034,11 +2168,13 @@ public class Codegen {
             ClassDecl cls = this.prog.classes.get(i);
             if (!cls.isInterface && !cls.isGenericTemplate) {
                 if (cls.constructors.size() == 0) {
-                    this.emitInitSig(cls, null);
-                    this.out.appendString(";\n");
-                    if (!cls.isAbstract) {
-                        this.emitMethodSig(cls, null);
+                    if (!cls.isStatic) {
+                        this.emitInitSig(cls, null);
                         this.out.appendString(";\n");
+                        if (!cls.isAbstract) {
+                            this.emitMethodSig(cls, null);
+                            this.out.appendString(";\n");
+                        }
                     }
                 } else {
                     int c = 0;
@@ -2092,7 +2228,9 @@ public class Codegen {
             }
 
             if (cls.constructors.size() == 0) {
-                this.emitConstructorDef(cls, null);
+                if (!cls.isStatic) {
+                    this.emitConstructorDef(cls, null);
+                }
             } else {
                 int c = 0;
                 while (c < cls.constructors.size()) {
@@ -2122,10 +2260,18 @@ public class Codegen {
                     }
                     this.setupShadowFrame(md, !md.isStatic);
                     if (md.body != null) {
-                        int s = 0;
-                        while (s < md.body.stmts.size()) {
-                            this.emitStmt(md.body.stmts.get(s));
-                            s = s + 1;
+                        if (md.isSynchronized) {
+                            Stmt syncWrap = new Stmt(StmtKind.SYNCHRONIZED(), md.line, md.col);
+                            syncWrap.expr = new Expr(ExprKind.THIS(), md.line, md.col);
+                            syncWrap.expr.inferredType = Type.makeResolvedClass(cls);
+                            syncWrap.thenBranch = md.body;
+                            this.emitStmt(syncWrap);
+                        } else {
+                            int s = 0;
+                            while (s < md.body.stmts.size()) {
+                                this.emitStmt(md.body.stmts.get(s));
+                                s = s + 1;
+                            }
                         }
                     }
                     if (this.gcTotalSlots > 0) {

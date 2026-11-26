@@ -749,10 +749,27 @@ public class Sema {
                 i = i + 1;
                 continue;
             }
+            if (cls.isStatic) {
+                if (cls.superClass != null || cls.impls.size() > 0) {
+                    this.errorAt(cls.line, cls.col,
+                        "static class '".concat(cls.name).concat("' cannot extend or implement types"));
+                    return false;
+                }
+                if (cls.constructors.size() > 0) {
+                    this.errorAt(cls.line, cls.col,
+                        "static class '".concat(cls.name).concat("' cannot declare constructors"));
+                    return false;
+                }
+            }
 
             int f = 0;
             while (f < cls.fields.size()) {
                 FieldDecl fld = cls.fields.get(f);
+                if (cls.isStatic && !fld.isStatic) {
+                    this.errorAt(fld.line, fld.col,
+                        "static class '".concat(cls.name).concat("' cannot have non-static field '").concat(fld.name).concat("'"));
+                    return false;
+                }
                 int prev = 0;
                 while (prev < f) {
                     if (cls.fields.get(prev).name.equals(fld.name)) {
@@ -794,6 +811,11 @@ public class Sema {
             int m = 0;
             while (m < cls.methods.size()) {
                 MethodDecl meth = cls.methods.get(m);
+                if (cls.isStatic && !meth.isStatic) {
+                    this.errorAt(meth.line, meth.col,
+                        "static class '".concat(cls.name).concat("' cannot have non-static method '").concat(meth.name).concat("'"));
+                    return false;
+                }
                 if (meth.isGenericTemplate) {
                     m = m + 1;
                     continue;
@@ -1863,6 +1885,10 @@ public class Sema {
                 this.errorAt(e.line, e.col, "cannot instantiate abstract class '".concat(e.name).concat("'"));
                 return;
             }
+            if (cls.isStatic) {
+                this.errorAt(e.line, e.col, "cannot instantiate static class '".concat(e.name).concat("'"));
+                return;
+            }
             if (cls.isGenericTemplate) {
                 Type[] gargs = new Type[cls.typeParamCount];
                 if (e.typeArgCount > 0) {
@@ -2144,6 +2170,17 @@ public class Sema {
             }
             return;
         }
+        if (k == StmtKind.SYNCHRONIZED()) {
+            this.checkExpr(st.expr);
+            if (this.hadError) return;
+            Type mt = st.expr.inferredType;
+            if (mt == null || (mt.kind != TypeKind.CLASS() && mt.kind != TypeKind.ARRAY())) {
+                this.errorAt(st.expr.line, st.expr.col, "'synchronized' expression must be an object or array reference");
+                return;
+            }
+            this.checkStmt(st.thenBranch);
+            return;
+        }
         if (k == StmtKind.TRY()) {
             ClassDecl excCls = this.findClass("Exception");
             if (excCls == null) {
@@ -2182,6 +2219,10 @@ public class Sema {
 
     private void checkMethod(ClassDecl cls, MethodDecl m) {
         if (m.isNative || m.body == null) {
+            return;
+        }
+        if (m.isSynchronized && m.isStatic) {
+            this.errorAt(m.line, m.col, "'static synchronized' methods are not supported; use 'synchronized(obj)'");
             return;
         }
         this.currentClass = cls;

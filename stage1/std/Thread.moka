@@ -1,0 +1,43 @@
+public class Thread implements Runnable {
+    private Runnable target;
+    private long handle;
+
+    private static native long rt_thread_spawn(Runnable target);
+    private static native void rt_thread_join(long h);
+    private static native void rt_thread_sleep(int ms);
+
+    public Thread() {
+        this.target = null;
+        this.handle = 0L;
+    }
+
+    public Thread(Runnable target) {
+        this.target = target;
+        this.handle = 0L;
+    }
+
+    public void run() {
+        if (this.target != null) {
+            this.target.run();
+        }
+    }
+
+    public void start() {
+        if (this.target != null) {
+            this.handle = Thread.rt_thread_spawn(this.target);
+        } else {
+            this.handle = Thread.rt_thread_spawn(this);
+        }
+    }
+
+    public void join() {
+        if (this.handle != 0L) {
+            Thread.rt_thread_join(this.handle);
+            this.handle = 0L;
+        }
+    }
+
+    public static void sleep(int ms) {
+        Thread.rt_thread_sleep(ms);
+    }
+}

@@ -1,0 +1,90 @@
+public static class Math {
+    public static final double PI = 3.14159265358979323846;
+    public static final double E = 2.71828182845904523536;
+
+    private static native double rt_math_sqrt(double x);
+    private static native double rt_math_pow(double a, double b);
+    private static native double rt_math_sin(double x);
+    private static native double rt_math_cos(double x);
+    private static native double rt_math_tan(double x);
+    private static native double rt_math_log(double x);
+    private static native double rt_math_exp(double x);
+    private static native double rt_math_floor(double x);
+    private static native double rt_math_ceil(double x);
+    private static native double rt_math_round(double x);
+    private static native double rt_math_fabs(double x);
+
+    public static int abs(int x) {
+        if (x < 0) return -x;
+        return x;
+    }
+
+    public static long abs(long x) {
+        if (x < 0L) return -x;
+        return x;
+    }
+
+    public static double abs(double x) {
+        return Math.rt_math_fabs(x);
+    }
+
+    public static int min(int a, int b) {
+        if (a < b) return a;
+        return b;
+    }
+
+    public static int max(int a, int b) {
+        if (a > b) return a;
+        return b;
+    }
+
+    public static double min(double a, double b) {
+        if (a < b) return a;
+        return b;
+    }
+
+    public static double max(double a, double b) {
+        if (a > b) return a;
+        return b;
+    }
+
+    public static double sqrt(double x) {
+        return Math.rt_math_sqrt(x);
+    }
+
+    public static double pow(double base, double exp) {
+        return Math.rt_math_pow(base, exp);
+    }
+
+    public static double sin(double x) {
+        return Math.rt_math_sin(x);
+    }
+
+    public static double cos(double x) {
+        return Math.rt_math_cos(x);
+    }
+
+    public static double tan(double x) {
+        return Math.rt_math_tan(x);
+    }
+
+    public static double log(double x) {
+        return Math.rt_math_log(x);
+    }
+
+    public static double exp(double x) {
+        return Math.rt_math_exp(x);
+    }
+
+    public static double floor(double x) {
+        return Math.rt_math_floor(x);
+    }
+
+    public static double ceil(double x) {
+        return Math.rt_math_ceil(x);
+    }
+
+    public static double round(double x) {
+        return Math.rt_math_round(x);
+    }
+}

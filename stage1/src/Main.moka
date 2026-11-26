@@ -190,6 +190,12 @@ public class Main {
             queueCount = queueCount + 1;
             queue[queueCount] = stdDir.concat("Exception.moka");
             queueCount = queueCount + 1;
+            queue[queueCount] = stdDir.concat("Runnable.moka");
+            queueCount = queueCount + 1;
+            queue[queueCount] = stdDir.concat("Thread.moka");
+            queueCount = queueCount + 1;
+            queue[queueCount] = stdDir.concat("Mutex.moka");
+            queueCount = queueCount + 1;
         }
 
         int u = 0;
@@ -299,12 +305,13 @@ public class Main {
             return 1;
         }
 
-        String cmd = "cc -std=c11 -Wall -Wextra -Werror -I"
+        String cmd = "cc -std=c11 -Wall -Wextra -Werror -pthread -I"
             .concat(runtimeDir)
             .concat(" ")
             .concat(cPath)
             .concat(" -o ")
-            .concat(outPath);
+            .concat(outPath)
+            .concat(" -lm");
 
         int rc = Io.exec(cmd);
         if (!keepC) {

@@ -1,15 +1,23 @@
 #ifndef MOKA_RUNTIME_H
 #define MOKA_RUNTIME_H
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
+#include <pthread.h>
 #include <setjmp.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* =========================================================================
  * Mark-and-Sweep Garbage Collector with Shadow Stack
@@ -60,11 +68,26 @@ typedef struct RtExceptionFrame {
     void* exception;
 } RtExceptionFrame;
 
-/* Global GC & runtime state */
+typedef struct RtThreadNode {
+    RtShadowFrame* volatile* shadow_stack_ptr;
+    RtExceptionFrame* volatile* exc_top_ptr;
+    volatile int32_t in_native_wait;
+    struct RtThreadNode* next;
+} RtThreadNode;
+
+/* Global & thread-local GC & runtime state */
 static Obj* rt_all_objects = NULL;
-static RtShadowFrame* rt_shadow_stack = NULL;
-static RtExceptionFrame* rt_exc_top = NULL;
-static size_t rt_num_objects = 0;
+static _Thread_local RtShadowFrame* rt_shadow_stack = NULL;
+static _Thread_local RtExceptionFrame* rt_exc_top = NULL;
+static _Thread_local RtThreadNode* rt_current_thread_node = NULL;
+static RtThreadNode* rt_thread_list = NULL;
+static pthread_mutex_t rt_gc_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t rt_stw_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t rt_stw_cond = PTHREAD_COND_INITIALIZER;
+static atomic_int rt_stw_requested = 0;
+static int rt_stw_paused_count = 0;
+
+static atomic_size_t rt_num_objects = 0;
 static size_t rt_gc_threshold = 1024;
 static size_t rt_total_collections = 0;
 static size_t rt_total_freed = 0;
@@ -74,10 +97,58 @@ static void** rt_static_roots = NULL;
 static size_t rt_static_root_count = 0;
 static size_t rt_static_root_cap = 0;
 
+static inline void rt_thread_register(RtThreadNode* node) {
+    node->shadow_stack_ptr = (RtShadowFrame* volatile*)&rt_shadow_stack;
+    node->exc_top_ptr = (RtExceptionFrame* volatile*)&rt_exc_top;
+    node->in_native_wait = 0;
+    pthread_mutex_lock(&rt_gc_mutex);
+    node->next = rt_thread_list;
+    rt_thread_list = node;
+    pthread_mutex_unlock(&rt_gc_mutex);
+    rt_current_thread_node = node;
+}
+
+static inline void rt_thread_unregister(RtThreadNode* node) {
+    pthread_mutex_lock(&rt_stw_mutex);
+    pthread_mutex_lock(&rt_gc_mutex);
+    RtThreadNode** cur = &rt_thread_list;
+    while (*cur != NULL) {
+        if (*cur == node) {
+            *cur = node->next;
+            break;
+        }
+        cur = &(*cur)->next;
+    }
+    pthread_mutex_unlock(&rt_gc_mutex);
+    rt_current_thread_node = NULL;
+    pthread_cond_broadcast(&rt_stw_cond);
+    pthread_mutex_unlock(&rt_stw_mutex);
+}
+
+static inline void rt_gc_enter_blocking(void) {
+    if (!rt_current_thread_node) return;
+    pthread_mutex_lock(&rt_stw_mutex);
+    rt_current_thread_node->in_native_wait = 1;
+    pthread_cond_broadcast(&rt_stw_cond);
+    pthread_mutex_unlock(&rt_stw_mutex);
+}
+
+static inline void rt_gc_leave_blocking(void) {
+    if (!rt_current_thread_node) return;
+    pthread_mutex_lock(&rt_stw_mutex);
+    while (atomic_load(&rt_stw_requested)) {
+        pthread_cond_wait(&rt_stw_cond, &rt_stw_mutex);
+    }
+    rt_current_thread_node->in_native_wait = 0;
+    pthread_mutex_unlock(&rt_stw_mutex);
+}
+
 static inline void rt_init(int argc, char** argv) {
+    static RtThreadNode main_node;
     rt_all_objects = NULL;
     rt_shadow_stack = NULL;
-    rt_num_objects = 0;
+    rt_exc_top = NULL;
+    atomic_store(&rt_num_objects, 0);
     rt_gc_threshold = 1024;
     rt_total_collections = 0;
     rt_total_freed = 0;
@@ -86,6 +157,8 @@ static inline void rt_init(int argc, char** argv) {
     rt_static_roots = NULL;
     rt_static_root_count = 0;
     rt_static_root_cap = 0;
+    rt_thread_list = NULL;
+    rt_thread_register(&main_node);
 }
 
 static inline void rt_gc_add_static_root(void* slot) {
@@ -133,12 +206,19 @@ static inline void rt_gc_mark_obj(Obj* obj) {
 }
 
 static inline void rt_gc_mark_roots(void) {
-    for (RtShadowFrame* f = rt_shadow_stack; f != NULL; f = f->prev) {
-        for (int32_t i = 0; i < f->count; i++) {
-            if (f->slots[i] != NULL) {
-                Obj* obj = NULL;
-                memcpy(&obj, f->slots[i], sizeof(Obj*));
-                rt_gc_mark_obj(obj);
+    for (RtThreadNode* tn = rt_thread_list; tn != NULL; tn = tn->next) {
+        for (RtShadowFrame* f = *tn->shadow_stack_ptr; f != NULL; f = f->prev) {
+            for (int32_t i = 0; i < f->count; i++) {
+                if (f->slots[i] != NULL) {
+                    Obj* obj = NULL;
+                    memcpy(&obj, f->slots[i], sizeof(Obj*));
+                    rt_gc_mark_obj(obj);
+                }
+            }
+        }
+        for (RtExceptionFrame* ef = *tn->exc_top_ptr; ef != NULL; ef = ef->prev) {
+            if (ef->exception != NULL) {
+                rt_gc_mark_obj((Obj*)ef->exception);
             }
         }
     }
@@ -147,11 +227,6 @@ static inline void rt_gc_mark_roots(void) {
             Obj* obj = NULL;
             memcpy(&obj, rt_static_roots[i], sizeof(Obj*));
             rt_gc_mark_obj(obj);
-        }
-    }
-    for (RtExceptionFrame* ef = rt_exc_top; ef != NULL; ef = ef->prev) {
-        if (ef->exception != NULL) {
-            rt_gc_mark_obj((Obj*)ef->exception);
         }
     }
 }
@@ -163,7 +238,7 @@ static inline void rt_gc_sweep(void) {
         if (!obj->marked) {
             *cur = obj->next;
             free(obj);
-            rt_num_objects--;
+            atomic_fetch_sub(&rt_num_objects, 1);
             rt_total_freed++;
         } else {
             obj->marked = false;
@@ -172,24 +247,69 @@ static inline void rt_gc_sweep(void) {
     }
 }
 
+static inline void rt_gc_safepoint_park_locked(void) {
+    rt_stw_paused_count++;
+    pthread_cond_broadcast(&rt_stw_cond);
+    while (atomic_load(&rt_stw_requested)) {
+        pthread_cond_wait(&rt_stw_cond, &rt_stw_mutex);
+    }
+    rt_stw_paused_count--;
+}
+
 static inline void rt_gc_collect(void) {
+    pthread_mutex_lock(&rt_stw_mutex);
+    if (atomic_load(&rt_stw_requested)) {
+        rt_gc_safepoint_park_locked();
+        pthread_mutex_unlock(&rt_stw_mutex);
+        return;
+    }
+    atomic_store(&rt_stw_requested, 1);
+    while (1) {
+        int other_running = 0;
+        pthread_mutex_lock(&rt_gc_mutex);
+        for (RtThreadNode* tn = rt_thread_list; tn != NULL; tn = tn->next) {
+            if (tn != rt_current_thread_node && !tn->in_native_wait) {
+                other_running++;
+            }
+        }
+        pthread_mutex_unlock(&rt_gc_mutex);
+        if (rt_stw_paused_count >= other_running) {
+            break;
+        }
+        pthread_cond_wait(&rt_stw_cond, &rt_stw_mutex);
+    }
+
+    pthread_mutex_lock(&rt_gc_mutex);
     rt_gc_mark_roots();
     rt_gc_sweep();
     rt_total_collections++;
-    rt_gc_threshold = rt_num_objects * 2;
+    size_t live = atomic_load(&rt_num_objects);
+    rt_gc_threshold = live * 2;
     if (rt_gc_threshold < 256) {
         rt_gc_threshold = 256;
     }
+    pthread_mutex_unlock(&rt_gc_mutex);
+
+    atomic_store(&rt_stw_requested, 0);
+    pthread_cond_broadcast(&rt_stw_cond);
+    pthread_mutex_unlock(&rt_stw_mutex);
 }
 
 static inline void rt_gc_maybe_collect(void) {
-    if (rt_num_objects >= rt_gc_threshold) {
+    if (atomic_load(&rt_stw_requested)) {
+        pthread_mutex_lock(&rt_stw_mutex);
+        if (atomic_load(&rt_stw_requested)) {
+            rt_gc_safepoint_park_locked();
+        }
+        pthread_mutex_unlock(&rt_stw_mutex);
+    }
+    if (atomic_load(&rt_num_objects) >= rt_gc_threshold) {
         rt_gc_collect();
     }
 }
 
 static inline int32_t rt_gc_live_objects(void) {
-    return (int32_t)rt_num_objects;
+    return (int32_t)atomic_load(&rt_num_objects);
 }
 
 static inline int32_t rt_gc_collections(void) {
@@ -225,9 +345,11 @@ static inline void* rt_alloc_instance(size_t size, const RtTypeInfo* type_info) 
     obj->type = OBJ_INSTANCE;
     obj->marked = false;
     obj->type_info = type_info;
+    pthread_mutex_lock(&rt_gc_mutex);
     obj->next = rt_all_objects;
     rt_all_objects = obj;
-    rt_num_objects++;
+    atomic_fetch_add(&rt_num_objects, 1);
+    pthread_mutex_unlock(&rt_gc_mutex);
     return obj;
 }
 
@@ -240,9 +362,11 @@ static inline void* rt_alloc_obj(size_t size, ObjType type) {
     obj->type = type;
     obj->marked = false;
     obj->type_info = NULL;
+    pthread_mutex_lock(&rt_gc_mutex);
     obj->next = rt_all_objects;
     rt_all_objects = obj;
-    rt_num_objects++;
+    atomic_fetch_add(&rt_num_objects, 1);
+    pthread_mutex_unlock(&rt_gc_mutex);
     return obj;
 }
 
@@ -688,5 +812,180 @@ static inline float rt_parse_float_val(RtArray* bytes) {
     bool ok = false;
     return rt_parse_float(bytes, &ok);
 }
+
+/* =========================================================================
+ * Concurrency: Threads, Mutexes & Object Monitors
+ * ========================================================================= */
+
+typedef struct RtThreadLaunch {
+    void* obj;
+    void (*run_fn)(void*);
+} RtThreadLaunch;
+
+static inline void* rt_thread_entry(void* arg) {
+    RtThreadLaunch* launch = (RtThreadLaunch*)arg;
+    void* obj = launch->obj;
+    void (*run_fn)(void*) = launch->run_fn;
+    free(launch);
+
+    RtThreadNode node;
+    rt_thread_register(&node);
+
+    void* root_slot = obj;
+    void* slots[1] = { &root_slot };
+    RtShadowFrame sf = { .prev = NULL, .count = 1, .slots = slots };
+    rt_shadow_stack = &sf;
+
+    run_fn(root_slot);
+
+    rt_shadow_stack = NULL;
+    rt_thread_unregister(&node);
+    return NULL;
+}
+
+static inline int64_t rt_thread_spawn_raw(void* obj, void (*run_fn)(void*)) {
+    RtThreadLaunch* launch = (RtThreadLaunch*)malloc(sizeof(RtThreadLaunch));
+    if (!launch) {
+        fprintf(stderr, "moka runtime error: out of memory spawning thread\n");
+        exit(1);
+    }
+    launch->obj = obj;
+    launch->run_fn = run_fn;
+    pthread_t* th = (pthread_t*)malloc(sizeof(pthread_t));
+    if (!th) {
+        free(launch);
+        fprintf(stderr, "moka runtime error: out of memory allocating pthread_t\n");
+        exit(1);
+    }
+    if (pthread_create(th, NULL, rt_thread_entry, launch) != 0) {
+        free(launch);
+        free(th);
+        fprintf(stderr, "moka runtime error: pthread_create failed\n");
+        exit(1);
+    }
+    return (int64_t)(intptr_t)th;
+}
+
+static inline void rt_thread_join(int64_t h) {
+    if (h == 0) return;
+    pthread_t* th = (pthread_t*)(intptr_t)h;
+    rt_gc_enter_blocking();
+    pthread_join(*th, NULL);
+    rt_gc_leave_blocking();
+    free(th);
+}
+
+static inline void rt_thread_sleep(int32_t ms) {
+    if (ms <= 0) return;
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    rt_gc_enter_blocking();
+    nanosleep(&ts, NULL);
+    rt_gc_leave_blocking();
+}
+
+static inline int64_t rt_mutex_create(void) {
+    pthread_mutex_t* m = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
+    if (!m) {
+        fprintf(stderr, "moka runtime error: out of memory creating mutex\n");
+        exit(1);
+    }
+    pthread_mutex_init(m, NULL);
+    return (int64_t)(intptr_t)m;
+}
+
+static inline void rt_mutex_lock(int64_t h) {
+    if (h == 0) return;
+    pthread_mutex_t* m = (pthread_mutex_t*)(intptr_t)h;
+    rt_gc_enter_blocking();
+    pthread_mutex_lock(m);
+    rt_gc_leave_blocking();
+}
+
+static inline void rt_mutex_unlock(int64_t h) {
+    if (h == 0) return;
+    pthread_mutex_t* m = (pthread_mutex_t*)(intptr_t)h;
+    pthread_mutex_unlock(m);
+}
+
+typedef struct RtMonitor {
+    void* obj;
+    pthread_mutex_t mtx;
+    pthread_t owner;
+    int32_t depth;
+    struct RtMonitor* next;
+} RtMonitor;
+
+static RtMonitor* rt_monitor_list = NULL;
+static pthread_mutex_t rt_monitor_table_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+static inline RtMonitor* rt_get_monitor(void* obj) {
+    pthread_mutex_lock(&rt_monitor_table_mtx);
+    RtMonitor* cur = rt_monitor_list;
+    while (cur != NULL) {
+        if (cur->obj == obj) {
+            pthread_mutex_unlock(&rt_monitor_table_mtx);
+            return cur;
+        }
+        cur = cur->next;
+    }
+    RtMonitor* mon = (RtMonitor*)calloc(1, sizeof(RtMonitor));
+    if (!mon) {
+        pthread_mutex_unlock(&rt_monitor_table_mtx);
+        fprintf(stderr, "moka runtime error: out of memory allocating monitor\n");
+        exit(1);
+    }
+    mon->obj = obj;
+    pthread_mutex_init(&mon->mtx, NULL);
+    mon->depth = 0;
+    mon->next = rt_monitor_list;
+    rt_monitor_list = mon;
+    pthread_mutex_unlock(&rt_monitor_table_mtx);
+    return mon;
+}
+
+static inline void rt_monitor_enter(void* obj) {
+    if (!obj) {
+        fprintf(stderr, "moka runtime error: synchronized on null\n");
+        exit(1);
+    }
+    RtMonitor* mon = rt_get_monitor(obj);
+    pthread_t self = pthread_self();
+    if (mon->depth > 0 && pthread_equal(mon->owner, self)) {
+        mon->depth++;
+        return;
+    }
+    rt_gc_enter_blocking();
+    pthread_mutex_lock(&mon->mtx);
+    rt_gc_leave_blocking();
+    mon->owner = self;
+    mon->depth = 1;
+}
+
+static inline void rt_monitor_exit(void* obj) {
+    if (!obj) return;
+    RtMonitor* mon = rt_get_monitor(obj);
+    mon->depth--;
+    if (mon->depth == 0) {
+        pthread_mutex_unlock(&mon->mtx);
+    }
+}
+
+/* =========================================================================
+ * Math helpers
+ * ========================================================================= */
+
+static inline double rt_math_sqrt(double x)            { return sqrt(x); }
+static inline double rt_math_pow(double a, double b)   { return pow(a, b); }
+static inline double rt_math_sin(double x)             { return sin(x); }
+static inline double rt_math_cos(double x)             { return cos(x); }
+static inline double rt_math_tan(double x)             { return tan(x); }
+static inline double rt_math_log(double x)             { return log(x); }
+static inline double rt_math_exp(double x)             { return exp(x); }
+static inline double rt_math_floor(double x)           { return floor(x); }
+static inline double rt_math_ceil(double x)            { return ceil(x); }
+static inline double rt_math_round(double x)           { return round(x); }
+static inline double rt_math_fabs(double x)            { return fabs(x); }
 
 #endif /* MOKA_RUNTIME_H */

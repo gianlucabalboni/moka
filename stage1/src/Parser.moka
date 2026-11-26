@@ -931,6 +931,16 @@ public class Parser {
             s.expr = val;
             return s;
         }
+        if (tok.kind == TokenKind.KW_SYNCHRONIZED()) {
+            this.advanceTok();
+            this.expect(TokenKind.LPAREN(), "expected '(' after 'synchronized'");
+            Expr mon = this.parseExpr();
+            this.expect(TokenKind.RPAREN(), "expected ')' after synchronized expression");
+            Stmt s = new Stmt(StmtKind.SYNCHRONIZED(), tok.line, tok.col);
+            s.expr = mon;
+            s.thenBranch = this.parseBlock();
+            return s;
+        }
         if (tok.kind == TokenKind.KW_TRY()) {
             this.advanceTok();
             Stmt s = new Stmt(StmtKind.TRY(), tok.line, tok.col);
@@ -990,13 +1000,17 @@ public class Parser {
     private ClassDecl parseClass() {
         boolean isAbstractCls = false;
         boolean isFinalCls = false;
+        boolean isStaticCls = false;
         while (!this.hadError &&
                (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE() ||
-                this.t0.kind == TokenKind.KW_ABSTRACT() || this.t0.kind == TokenKind.KW_FINAL())) {
+                this.t0.kind == TokenKind.KW_ABSTRACT() || this.t0.kind == TokenKind.KW_FINAL() ||
+                this.t0.kind == TokenKind.KW_STATIC())) {
             if (this.t0.kind == TokenKind.KW_ABSTRACT()) {
                 isAbstractCls = true;
             } else if (this.t0.kind == TokenKind.KW_FINAL()) {
                 isFinalCls = true;
+            } else if (this.t0.kind == TokenKind.KW_STATIC()) {
+                isStaticCls = true;
             }
             this.advanceTok();
         }
@@ -1009,6 +1023,9 @@ public class Parser {
             if (isFinalCls) {
                 this.errorAt(classKw, "'final' modifier cannot be used on 'interface'");
             }
+            if (isStaticCls) {
+                this.errorAt(classKw, "'static' modifier cannot be used on 'interface'");
+            }
             isIface = true;
             this.advanceTok();
         } else {
@@ -1016,12 +1033,16 @@ public class Parser {
             if (isAbstractCls && isFinalCls) {
                 this.errorAt(classKw, "class cannot be both 'abstract' and 'final'");
             }
+            if (isAbstractCls && isStaticCls) {
+                this.errorAt(classKw, "class cannot be both 'abstract' and 'static'");
+            }
         }
         Token nameTok = this.expect(TokenKind.IDENT(), "expected type name");
         ClassDecl cls = new ClassDecl(nameTok.lexeme, classKw.line, classKw.col);
         cls.isInterface = isIface;
         cls.isAbstract = isAbstractCls;
-        cls.isFinal = isFinalCls;
+        cls.isFinal = isFinalCls || isStaticCls;
+        cls.isStatic = isStaticCls;
 
         if (!this.hadError && this.t0.kind == TokenKind.LT()) {
             this.advanceTok();
@@ -1073,18 +1094,21 @@ public class Parser {
             boolean isNative = false;
             boolean isAbstract = false;
             boolean isFinal = false;
+            boolean isSynchronized = false;
             while (!this.hadError &&
                    (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE() ||
                     this.t0.kind == TokenKind.KW_STATIC() || this.t0.kind == TokenKind.KW_NATIVE() ||
-                    this.t0.kind == TokenKind.KW_ABSTRACT() || this.t0.kind == TokenKind.KW_FINAL())) {
-                if (this.t0.kind == TokenKind.KW_STATIC())   isStatic = true;
-                if (this.t0.kind == TokenKind.KW_NATIVE())   isNative = true;
-                if (this.t0.kind == TokenKind.KW_ABSTRACT()) isAbstract = true;
-                if (this.t0.kind == TokenKind.KW_FINAL())    isFinal = true;
+                    this.t0.kind == TokenKind.KW_ABSTRACT() || this.t0.kind == TokenKind.KW_FINAL() ||
+                    this.t0.kind == TokenKind.KW_SYNCHRONIZED())) {
+                if (this.t0.kind == TokenKind.KW_STATIC())       isStatic = true;
+                if (this.t0.kind == TokenKind.KW_NATIVE())       isNative = true;
+                if (this.t0.kind == TokenKind.KW_ABSTRACT())     isAbstract = true;
+                if (this.t0.kind == TokenKind.KW_FINAL())        isFinal = true;
+                if (this.t0.kind == TokenKind.KW_SYNCHRONIZED()) isSynchronized = true;
                 this.advanceTok();
             }
 
-            if (!isStatic && !isNative && !isAbstract && !isFinal &&
+            if (!isStatic && !isNative && !isAbstract && !isFinal && !isSynchronized &&
                 this.t0.kind == TokenKind.IDENT() &&
                 this.t0.equals(cls.name) &&
                 this.t1.kind == TokenKind.LPAREN()) {
@@ -1176,6 +1200,7 @@ public class Parser {
                                               isStatic, isNative, memberName.line, memberName.col);
                 m.isAbstract = isAbstract;
                 m.isFinal = isFinal;
+                m.isSynchronized = isSynchronized;
                 m.owner = cls;
                 int tpi = 0;
                 while (tpi < javaTypeParamCount) {
@@ -1249,12 +1274,17 @@ public class Parser {
             } else if (this.t0.kind == TokenKind.IDENT()) {
                 ByteBuffer buf = new ByteBuffer(32);
                 Token seg = this.advanceTok();
-                buf.appendString(seg.lexeme);
+                if (!(seg.lexeme.equals("std") &&
+                      (this.t0.kind == TokenKind.DOT() || this.t0.kind == TokenKind.SLASH()))) {
+                    buf.appendString(seg.lexeme);
+                }
                 while (!this.hadError &&
                        (this.t0.kind == TokenKind.DOT() || this.t0.kind == TokenKind.SLASH())) {
                     this.advanceTok();
                     seg = this.expect(TokenKind.IDENT(), "expected identifier in import path");
-                    buf.appendByte('/');
+                    if (buf.length() > 0) {
+                        buf.appendByte('/');
+                    }
                     buf.appendString(seg.lexeme);
                 }
                 buf.appendString(".moka");

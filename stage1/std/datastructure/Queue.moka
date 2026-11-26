@@ -1,0 +1,56 @@
+public class Queue<T> {
+    private T[] items;
+    private int head;
+    private int tail;
+    private int count;
+
+    public Queue() {
+        this.items = new T[8];
+        this.head = 0;
+        this.tail = 0;
+        this.count = 0;
+    }
+
+    public int size() {
+        return this.count;
+    }
+
+    public boolean isEmpty() {
+        return this.count == 0;
+    }
+
+    public void enqueue(T item) {
+        if (this.count >= this.items.length) {
+            int newCap = this.items.length * 2;
+            T[] next = new T[newCap];
+            for (int i = 0; i < this.count; i++) {
+                next[i] = this.items[(this.head + i) % this.items.length];
+            }
+            this.items = next;
+            this.head = 0;
+            this.tail = this.count;
+        }
+        this.items[this.tail] = item;
+        this.tail = (this.tail + 1) % this.items.length;
+        this.count++;
+    }
+
+    public T dequeue() {
+        if (this.count == 0) {
+            throw new Exception("Queue underflow");
+        }
+        T val = this.items[this.head];
+        T[] zero = new T[1];
+        this.items[this.head] = zero[0];
+        this.head = (this.head + 1) % this.items.length;
+        this.count--;
+        return val;
+    }
+
+    public T peek() {
+        if (this.count == 0) {
+            throw new Exception("Queue is empty");
+        }
+        return this.items[this.head];
+    }
+}

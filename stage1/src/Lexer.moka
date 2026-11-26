@@ -110,8 +110,9 @@ public class Lexer {
         if (s.equals("try"))        return TokenKind.KW_TRY();
         if (s.equals("catch"))      return TokenKind.KW_CATCH();
         if (s.equals("finally"))    return TokenKind.KW_FINALLY();
-        if (s.equals("throw"))      return TokenKind.KW_THROW();
-        if (s.equals("final"))      return TokenKind.KW_FINAL();
+        if (s.equals("throw"))        return TokenKind.KW_THROW();
+        if (s.equals("final"))        return TokenKind.KW_FINAL();
+        if (s.equals("synchronized")) return TokenKind.KW_SYNCHRONIZED();
         return TokenKind.IDENT();
     }
 

@@ -1,0 +1,19 @@
+public class Mutex {
+    private long handle;
+
+    private static native long rt_mutex_create();
+    private static native void rt_mutex_lock(long h);
+    private static native void rt_mutex_unlock(long h);
+
+    public Mutex() {
+        this.handle = Mutex.rt_mutex_create();
+    }
+
+    public void lock() {
+        Mutex.rt_mutex_lock(this.handle);
+    }
+
+    public void unlock() {
+        Mutex.rt_mutex_unlock(this.handle);
+    }
+}

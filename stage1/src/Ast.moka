@@ -222,8 +222,9 @@ public class StmtKind {
     public static int CASE()     { return 10; }
     public static int DEFAULT()  { return 11; }
     public static int TRY()      { return 12; }
-    public static int CATCH()    { return 13; }
-    public static int THROW()    { return 14; }
+    public static int CATCH()        { return 13; }
+    public static int THROW()        { return 14; }
+    public static int SYNCHRONIZED() { return 15; }
 }
 
 public class Stmt {
@@ -385,6 +386,7 @@ public class MethodDecl {
     public boolean isNative;
     public boolean isAbstract;
     public boolean isFinal;
+    public boolean isSynchronized;
     public String[] typeParams;
     public int typeParamCount;
     public boolean isGenericTemplate;
@@ -409,6 +411,7 @@ public class MethodDecl {
         this.isNative = isNative;
         this.isAbstract = false;
         this.isFinal = false;
+        this.isSynchronized = false;
         this.typeParamCount = 0;
         this.isGenericTemplate = false;
         this.genericArgCount = 0;
@@ -478,6 +481,8 @@ public class ClassDecl {
     public boolean isInterface;
     public boolean isAbstract;
     public boolean isFinal;
+    public boolean isStatic;
+    public boolean isSynchronized;
     public String[] typeParams;
     public int typeParamCount;
     public boolean isGenericTemplate;
@@ -502,6 +507,8 @@ public class ClassDecl {
         this.isInterface = false;
         this.isAbstract = false;
         this.isFinal = false;
+        this.isStatic = false;
+        this.isSynchronized = false;
         this.typeParamCount = 0;
         this.isGenericTemplate = false;
         this.genericArgCount = 0;

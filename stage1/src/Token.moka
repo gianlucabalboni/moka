@@ -47,8 +47,9 @@ public class TokenKind {
     public static int KW_TRY()        { return 82; }
     public static int KW_CATCH()      { return 83; }
     public static int KW_FINALLY()    { return 84; }
-    public static int KW_THROW()      { return 85; }
-    public static int KW_FINAL()      { return 86; }
+    public static int KW_THROW()        { return 85; }
+    public static int KW_FINAL()        { return 86; }
+    public static int KW_SYNCHRONIZED() { return 87; }
 
     public static int LPAREN()      { return 26; }
     public static int RPAREN()      { return 27; }
@@ -179,6 +180,7 @@ public class TokenKind {
         if (k == 84) return "finally";
         if (k == 85) return "throw";
         if (k == 86) return "final";
+        if (k == 87) return "synchronized";
         return "UNKNOWN";
     }
 }
