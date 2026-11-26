@@ -34,7 +34,11 @@ make -C stage1 all
 # Installa mokac, std/ e runtime/ in ~/.local/ (aggiunge `mokac` in ~/.local/bin)
 make -C stage1 install
 
-# Compila ed esegui al volo da qualsiasi directory
+# Compila in un eseguibile ed eseguilo
+mokac hello.moka -o hello
+./hello
+
+# Oppure compila ed esegui al volo da qualsiasi directory
 mokac -r hello.moka
 
 # Disinstalla globalmente in un colpo solo
