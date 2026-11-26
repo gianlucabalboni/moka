@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -std=c11 -Wall -Wextra -Werror -pthread -g
+CFLAGS = -std=c11 -O2 -Wall -Wextra -Werror -pthread -g
 STAGE0 = ../stage0/build/mokac
 RUNTIME_DIR = runtime
 STD_FILES = std/String.moka std/Console.moka std/ByteBuffer.moka std/Io.moka std/Exception.moka std/Runnable.moka std/Thread.moka std/Mutex.moka

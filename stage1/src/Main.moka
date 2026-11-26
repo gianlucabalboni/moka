@@ -325,7 +325,7 @@ public class Main {
             return 1;
         }
 
-        String cmd = "cc -std=c11 -Wall -Wextra -Werror -pthread -I"
+        String cmd = "cc -std=c11 -O2 -Wall -Wextra -Werror -pthread -I"
             .concat(runtimeDir)
             .concat(" ")
             .concat(cPath)

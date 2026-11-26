@@ -20,6 +20,7 @@ public class Codegen {
     private String[] excFrameNames;
     private Stmt[] excFinallyBlocks;
     private String[] excSyncObjs;
+    private boolean methodHasTry;
 
     public Codegen(Program prog) {
         this.prog = prog;
@@ -38,6 +39,45 @@ public class Codegen {
         this.excFrameNames = new String[64];
         this.excFinallyBlocks = new Stmt[64];
         this.excSyncObjs = new String[64];
+        this.methodHasTry = false;
+    }
+
+    private boolean hasTryStmt(Stmt st) {
+        if (st == null) {
+            return false;
+        }
+        int k = st.kind;
+        if (k == StmtKind.TRY() || k == StmtKind.SYNCHRONIZED()) {
+            return true;
+        }
+        if (k == StmtKind.BLOCK()) {
+            int i = 0;
+            while (i < st.stmts.size()) {
+                if (this.hasTryStmt(st.stmts.get(i))) return true;
+                i = i + 1;
+            }
+            return false;
+        }
+        if (k == StmtKind.IF()) {
+            return this.hasTryStmt(st.thenBranch) || this.hasTryStmt(st.elseBranch);
+        }
+        if (k == StmtKind.WHILE() || k == StmtKind.FOR()) {
+            return this.hasTryStmt(st.thenBranch);
+        }
+        if (k == StmtKind.SWITCH()) {
+            int i = 0;
+            while (i < st.stmts.size()) {
+                Stmt c = st.stmts.get(i);
+                int j = 0;
+                while (j < c.stmts.size()) {
+                    if (this.hasTryStmt(c.stmts.get(j))) return true;
+                    j = j + 1;
+                }
+                i = i + 1;
+            }
+            return false;
+        }
+        return false;
     }
 
     private boolean isRefType(Type ty) {
@@ -804,6 +844,9 @@ public class Codegen {
         }
         if (k == StmtKind.VAR_DECL()) {
             this.emitIndent();
+            if (this.methodHasTry && !this.isRefType(st.varType) && !this.isInterfaceType(st.varType)) {
+                this.out.appendString("volatile ");
+            }
             this.emitCType(st.varType);
             this.out.appendByte(' ');
             this.out.appendString(st.varName);
@@ -1047,11 +1090,11 @@ public class Codegen {
 
             if (hasFin) {
                 this.emitIndent();
-                this.out.appendString("void* _fin_exc_");
+                this.out.appendString("void* volatile _fin_exc_");
                 this.out.appendInt(id);
                 this.out.appendString(" = NULL;\n");
                 this.emitIndent();
-                this.out.appendString("bool _fin_rethrow_");
+                this.out.appendString("volatile bool _fin_rethrow_");
                 this.out.appendInt(id);
                 this.out.appendString(" = false;\n");
                 this.emitIndent();
@@ -1255,11 +1298,11 @@ public class Codegen {
             this.out.appendString(objVar);
             this.out.appendString(");\n");
             this.emitIndent();
-            this.out.appendString("void* _sync_exc_");
+            this.out.appendString("void* volatile _sync_exc_");
             this.out.appendInt(id);
             this.out.appendString(" = NULL;\n");
             this.emitIndent();
-            this.out.appendString("bool _sync_rethrow_");
+            this.out.appendString("volatile bool _sync_rethrow_");
             this.out.appendInt(id);
             this.out.appendString(" = false;\n");
             this.emitIndent();
@@ -2251,6 +2294,7 @@ public class Codegen {
                     this.out.appendString(" {\n");
                     this.currentMethod = md;
                     this.excDepth = 0;
+                    this.methodHasTry = this.hasTryStmt(md.body);
                     this.indent = 1;
                     if (!md.isStatic) {
                         this.out.appendString("    (void)this;\n");
@@ -2288,6 +2332,7 @@ public class Codegen {
                     }
                     this.indent = 0;
                     this.currentMethod = null;
+                    this.methodHasTry = false;
                     this.out.appendString("}\n\n");
                 }
                 m = m + 1;
