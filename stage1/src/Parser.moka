@@ -3,6 +3,7 @@ public class Parser {
     private Token t0;
     private Token t1;
     private Token t2;
+    private Token t3;
     public boolean hadError;
     public String[] importPaths;
     public boolean[] importIsStd;
@@ -17,6 +18,7 @@ public class Parser {
         this.t0 = lex.next();
         this.t1 = lex.next();
         this.t2 = lex.next();
+        this.t3 = lex.next();
     }
 
     private Token peek() {
@@ -27,7 +29,8 @@ public class Parser {
         Token cur = this.t0;
         this.t0 = this.t1;
         this.t1 = this.t2;
-        this.t2 = this.lex.next();
+        this.t2 = this.t3;
+        this.t3 = this.lex.next();
         return cur;
     }
 
@@ -308,10 +311,22 @@ public class Parser {
         return expr;
     }
 
+    private boolean isExprStartKind(int k) {
+        return k == TokenKind.IDENT() || k == TokenKind.INT_LIT() ||
+               k == TokenKind.CHAR_LIT() || k == TokenKind.STRING_LIT() ||
+               k == TokenKind.KW_TRUE() || k == TokenKind.KW_FALSE() ||
+               k == TokenKind.KW_NULL() || k == TokenKind.KW_THIS() ||
+               k == TokenKind.KW_SUPER() || k == TokenKind.KW_NEW() ||
+               k == TokenKind.LPAREN() || k == TokenKind.BANG() ||
+               k == TokenKind.TILDE() || k == TokenKind.PLUS_PLUS() ||
+               k == TokenKind.MINUS_MINUS();
+    }
+
     private Expr parseUnary() {
         Token tok = this.peek();
         if (tok.kind == TokenKind.LPAREN() &&
-            (this.t1.kind == TokenKind.KW_INT() || this.t1.kind == TokenKind.KW_BYTE()) &&
+            ((this.t1.kind == TokenKind.KW_INT() || this.t1.kind == TokenKind.KW_BYTE()) ||
+             (this.t1.kind == TokenKind.IDENT() && this.isExprStartKind(this.t3.kind))) &&
             this.t2.kind == TokenKind.RPAREN()) {
             this.advanceTok(); /* '(' */
             Type targetTy = this.parseBaseType(false);
@@ -398,6 +413,15 @@ public class Parser {
         Expr left = this.parseShift();
         while (!this.hadError) {
             Token tok = this.peek();
+            if (tok.kind == TokenKind.KW_INSTANCEOF()) {
+                this.advanceTok();
+                Type targetTy = this.parseBaseType(false);
+                Expr e = new Expr(ExprKind.INSTANCEOF(), tok.line, tok.col);
+                e.left = left;
+                e.elemType = targetTy;
+                left = e;
+                continue;
+            }
             int op = -1;
             if (tok.kind == TokenKind.LT()) op = BinaryOp.LT();
             else if (tok.kind == TokenKind.LE()) op = BinaryOp.LE();
@@ -737,9 +761,13 @@ public class Parser {
         if (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE()) {
             this.advanceTok();
         }
+        boolean isAbstractCls = this.match(TokenKind.KW_ABSTRACT());
         boolean isIface = false;
         Token classKw = this.peek();
         if (classKw.kind == TokenKind.KW_INTERFACE()) {
+            if (isAbstractCls) {
+                this.errorAt(classKw, "'abstract' modifier cannot be used on 'interface'");
+            }
             isIface = true;
             this.advanceTok();
         } else {
@@ -748,6 +776,7 @@ public class Parser {
         Token nameTok = this.expect(TokenKind.IDENT(), "expected type name");
         ClassDecl cls = new ClassDecl(nameTok.lexeme, classKw.line, classKw.col);
         cls.isInterface = isIface;
+        cls.isAbstract = isAbstractCls;
 
         if (!isIface && this.match(TokenKind.KW_EXTENDS())) {
             Token supTok = this.expect(TokenKind.IDENT(), "expected superclass name after 'extends'");
@@ -782,22 +811,19 @@ public class Parser {
             }
             boolean isStatic = this.match(TokenKind.KW_STATIC());
             boolean isNative = this.match(TokenKind.KW_NATIVE());
+            boolean isAbstract = this.match(TokenKind.KW_ABSTRACT());
 
-            if (!isStatic && !isNative &&
+            if (!isStatic && !isNative && !isAbstract &&
                 this.t0.kind == TokenKind.IDENT() &&
                 this.t0.equals(cls.name) &&
                 this.t1.kind == TokenKind.LPAREN()) {
                 Token ctorTok = this.advanceTok();
-                if (cls.constructor != null) {
-                    this.errorAt(ctorTok, "multiple constructors are not supported in Stage 0");
-                    break;
-                }
                 MethodDecl ctor = new MethodDecl(cls.name, new Type(TypeKind.VOID()),
                                                  true, false, false, ctorTok.line, ctorTok.col);
                 ctor.owner = cls;
                 ctor.params = this.parseParamList();
                 ctor.body = this.parseBlock();
-                cls.constructor = ctor;
+                cls.constructors.add(ctor);
                 continue;
             }
 
@@ -809,20 +835,29 @@ public class Parser {
                     this.errorAt(memberName, "'native' methods must be 'static' in Stage 0");
                     break;
                 }
+                if (isAbstract && (isStatic || isNative)) {
+                    this.errorAt(memberName, "'abstract' methods cannot be 'static' or 'native'");
+                    break;
+                }
+                if (isAbstract && !cls.isAbstract) {
+                    this.errorAt(memberName, "'abstract' method must be inside an 'abstract' class");
+                    break;
+                }
                 MethodDecl m = new MethodDecl(memberName.lexeme, memberType, false,
                                               isStatic, isNative, memberName.line, memberName.col);
+                m.isAbstract = isAbstract;
                 m.owner = cls;
                 m.params = this.parseParamList();
-                if (isNative) {
-                    this.expect(TokenKind.SEMI(), "expected ';' after native method declaration");
+                if (isNative || isAbstract) {
+                    this.expect(TokenKind.SEMI(), "expected ';' after method declaration");
                     m.body = null;
                 } else {
                     m.body = this.parseBlock();
                 }
                 cls.methods.add(m);
             } else {
-                if (isNative) {
-                    this.errorAt(memberName, "fields cannot be 'native'");
+                if (isNative || isAbstract) {
+                    this.errorAt(memberName, "fields cannot be 'native' or 'abstract'");
                     break;
                 }
                 if (memberType.kind == TypeKind.VOID()) {

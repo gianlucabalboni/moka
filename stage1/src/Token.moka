@@ -35,6 +35,8 @@ public class TokenKind {
     public static int KW_INTERFACE()  { return 70; }
     public static int KW_IMPLEMENTS() { return 71; }
     public static int KW_IMPORT()     { return 72; }
+    public static int KW_INSTANCEOF() { return 73; }
+    public static int KW_ABSTRACT()   { return 74; }
 
     public static int LPAREN()      { return 26; }
     public static int RPAREN()      { return 27; }
@@ -151,6 +153,8 @@ public class TokenKind {
         if (k == 70) return "interface";
         if (k == 71) return "implements";
         if (k == 72) return "import";
+        if (k == 73) return "instanceof";
+        if (k == 74) return "abstract";
         return "UNKNOWN";
     }
 }

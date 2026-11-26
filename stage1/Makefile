@@ -5,9 +5,9 @@ RUNTIME_DIR = runtime
 STD_FILES = std/String.moka std/Console.moka std/ByteBuffer.moka std/Io.moka
 SRC_FILES = src/Token.moka src/Lexer.moka src/Ast.moka src/Parser.moka src/Sema.moka src/Codegen.moka src/Main.moka
 
-.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-bootstrap clean
+.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-bootstrap clean
 
-all: mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-bootstrap
+all: mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-bootstrap
 
 stage0:
 	$(MAKE) -C ../stage0 mokac
@@ -58,6 +58,14 @@ test-console-input: build/mokac $(STD_FILES) tests/test_console_input.moka
 test-import: build/mokac $(STD_FILES) tests/test_import.moka tests/import_helper.moka
 	./build/mokac tests/test_import.moka -o build/test_import
 	./build/test_import
+
+test-static-fields: build/mokac $(STD_FILES) tests/test_static_fields.moka
+	./build/mokac tests/test_static_fields.moka -o build/test_static_fields
+	./build/test_static_fields
+
+test-phase-a: build/mokac $(STD_FILES) tests/test_phase_a.moka
+	./build/mokac tests/test_phase_a.moka -o build/test_phase_a
+	./build/test_phase_a
 
 test-bootstrap: build/mokac $(STD_FILES) $(SRC_FILES)
 	./build/mokac --emit-c $(STD_FILES) $(SRC_FILES) -o build/stage1_gen1.c

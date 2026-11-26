@@ -1,0 +1,133 @@
+interface Drawable {
+    String draw();
+}
+
+abstract class Shape implements Drawable {
+    public String color;
+
+    public Shape() {
+        this.color = "white";
+    }
+
+    public Shape(String color) {
+        this.color = color;
+    }
+
+    public abstract int area();
+
+    public String draw() {
+        return "Shape(".concat(this.color).concat(")");
+    }
+}
+
+class Rect extends Shape {
+    public int w;
+    public int h;
+
+    public Rect(int size) {
+        super("blue");
+        this.w = size;
+        this.h = size;
+    }
+
+    public Rect(int w, int h, String color) {
+        super(color);
+        this.w = w;
+        this.h = h;
+    }
+
+    public int area() {
+        return this.w * this.h;
+    }
+
+    public String draw() {
+        return "Rect(".concat(this.color).concat(")");
+    }
+}
+
+class Circle extends Shape {
+    public int r;
+
+    public Circle(int r) {
+        super();
+        this.r = r;
+    }
+
+    public int area() {
+        return 3 * this.r * this.r;
+    }
+}
+
+class Printer {
+    public static String fmt(int x) {
+        return "int:".concat(String.fromInt(x));
+    }
+
+    public static String fmt(String s) {
+        return "str:".concat(s);
+    }
+
+    public static String fmt(int a, int b) {
+        return "pair:".concat(String.fromInt(a + b));
+    }
+}
+
+class Main {
+    public static int main() {
+        Shape s1 = new Rect(5);
+        Shape s2 = new Rect(3, 4, "red");
+        Shape s3 = new Circle(2);
+        Shape empty = null;
+
+        /* 1. Abstract & virtual dispatch */
+        if (s1.area() != 25 || s2.area() != 12 || s3.area() != 12) {
+            Console.eprintln("area() failed");
+            return 1;
+        }
+        if (!s1.draw().equals("Rect(blue)") || !s3.draw().equals("Shape(white)")) {
+            Console.eprintln("draw() failed");
+            return 1;
+        }
+
+        /* 2. instanceof */
+        if (!(s1 instanceof Rect) || !(s1 instanceof Shape) || !(s1 instanceof Drawable)) {
+            Console.eprintln("instanceof positive failed");
+            return 1;
+        }
+        if (s1 instanceof Circle || empty instanceof Shape) {
+            Console.eprintln("instanceof negative failed");
+            return 1;
+        }
+
+        /* 3. Downcasting (class & interface) */
+        Rect r2 = (Rect) s2;
+        if (r2.w != 3 || r2.h != 4 || !r2.color.equals("red")) {
+            Console.eprintln("downcast Shape -> Rect failed");
+            return 1;
+        }
+        Drawable d = (Drawable) s1;
+        Rect r1 = (Rect) d;
+        if (!d.draw().equals("Rect(blue)") || r1.w != 5) {
+            Console.eprintln("downcast Drawable -> Rect failed");
+            return 1;
+        }
+        Rect rNull = (Rect) empty;
+        if (rNull != null) {
+            Console.eprintln("null downcast failed");
+            return 1;
+        }
+
+        /* 4. Method overloading */
+        if (!Printer.fmt(7).equals("int:7") ||
+            !Printer.fmt("hi").equals("str:hi") ||
+            !Printer.fmt(10, 20).equals("pair:30")) {
+            Console.eprintln("overloading failed");
+            return 1;
+        }
+
+        Console.println(d.draw());
+        Console.println(Printer.fmt(r2.area()));
+        Console.println("All Stage 1 Phase A tests passed!");
+        return 0;
+    }
+}

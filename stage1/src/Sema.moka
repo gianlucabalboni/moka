@@ -371,8 +371,9 @@ public class Sema {
                 f = f + 1;
             }
 
-            if (cls.constructor != null) {
-                MethodDecl ctor = cls.constructor;
+            int c = 0;
+            while (c < cls.constructors.size()) {
+                MethodDecl ctor = cls.constructors.get(c);
                 int p = 0;
                 while (p < ctor.params.size()) {
                     Param pm = ctor.params.get(p);
@@ -381,20 +382,21 @@ public class Sema {
                     }
                     p = p + 1;
                 }
+                int prev = 0;
+                while (prev < c) {
+                    if (this.sameParamTypes(cls.constructors.get(prev), ctor)) {
+                        this.errorAt(ctor.line, ctor.col,
+                            "duplicate constructor signature in class '".concat(cls.name).concat("'"));
+                        return false;
+                    }
+                    prev = prev + 1;
+                }
+                c = c + 1;
             }
 
             int m = 0;
             while (m < cls.methods.size()) {
                 MethodDecl meth = cls.methods.get(m);
-                int prev = 0;
-                while (prev < m) {
-                    if (cls.methods.get(prev).name.equals(meth.name)) {
-                        this.errorAt(meth.line, meth.col,
-                            "duplicate method '".concat(meth.name).concat("' in class '").concat(cls.name).concat("'"));
-                        return false;
-                    }
-                    prev = prev + 1;
-                }
                 if (!this.resolveType(meth.returnType, meth.line, meth.col)) {
                     return false;
                 }
@@ -406,12 +408,142 @@ public class Sema {
                     }
                     p = p + 1;
                 }
+                int prev = 0;
+                while (prev < m) {
+                    MethodDecl pm = cls.methods.get(prev);
+                    if (pm.name.equals(meth.name) && this.sameParamTypes(pm, meth)) {
+                        this.errorAt(meth.line, meth.col,
+                            "duplicate method '".concat(meth.name).concat("' with same signature in class '").concat(cls.name).concat("'"));
+                        return false;
+                    }
+                    prev = prev + 1;
+                }
                 m = m + 1;
             }
 
             i = i + 1;
         }
+        this.assignMangledNames();
         return this.buildVTables();
+    }
+
+    private boolean sameParamTypes(MethodDecl a, MethodDecl b) {
+        if (a.params.size() != b.params.size()) {
+            return false;
+        }
+        int i = 0;
+        while (i < a.params.size()) {
+            if (!this.typesEqual(a.params.get(i).type, b.params.get(i).type)) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    private String mangleType(Type ty) {
+        if (ty.kind == TypeKind.INT())     return "int";
+        if (ty.kind == TypeKind.BYTE())    return "byte";
+        if (ty.kind == TypeKind.BOOLEAN()) return "bool";
+        if (ty.kind == TypeKind.VOID())    return "void";
+        if (ty.kind == TypeKind.CLASS())   return ty.resolvedClass.name;
+        if (ty.kind == TypeKind.ARRAY())   return "arr_".concat(this.mangleType(ty.elem));
+        return "unk";
+    }
+
+    private String mangleSuffix(MethodDecl m) {
+        if (m.params.size() == 0) {
+            return "__void";
+        }
+        ByteBuffer buf = new ByteBuffer(32);
+        buf.appendByte('_');
+        int i = 0;
+        while (i < m.params.size()) {
+            buf.appendByte('_');
+            buf.appendString(this.mangleType(m.params.get(i).type));
+            i = i + 1;
+        }
+        return buf.toString();
+    }
+
+    private boolean isNameOverloadedInProgram(String name) {
+        /* Check if any class has >1 method with this name */
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            int count = 0;
+            int m = 0;
+            while (m < cls.methods.size()) {
+                if (cls.methods.get(m).name.equals(name)) {
+                    count = count + 1;
+                    if (count > 1) {
+                        return true;
+                    }
+                }
+                m = m + 1;
+            }
+            i = i + 1;
+        }
+        /* Also check if a subclass overloads a superclass method with different params */
+        i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            int m = 0;
+            while (m < cls.methods.size()) {
+                MethodDecl md = cls.methods.get(m);
+                if (md.name.equals(name)) {
+                    ClassDecl sup = cls.superClass;
+                    while (sup != null) {
+                        int sm = 0;
+                        while (sm < sup.methods.size()) {
+                            MethodDecl smd = sup.methods.get(sm);
+                            if (smd.name.equals(name) && !this.sameParamTypes(md, smd)) {
+                                return true;
+                            }
+                            sm = sm + 1;
+                        }
+                        sup = sup.superClass;
+                    }
+                }
+                m = m + 1;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    private void assignMangledNames() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            boolean multiCtor = cls.constructors.size() > 1;
+            int c = 0;
+            while (c < cls.constructors.size()) {
+                MethodDecl ctor = cls.constructors.get(c);
+                if (multiCtor) {
+                    String suf = this.mangleSuffix(ctor);
+                    ctor.cName = cls.name.concat("_new").concat(suf);
+                    ctor.cInitName = cls.name.concat("_init").concat(suf);
+                } else {
+                    ctor.cName = cls.name.concat("_new");
+                    ctor.cInitName = cls.name.concat("_init");
+                }
+                c = c + 1;
+            }
+            int m = 0;
+            while (m < cls.methods.size()) {
+                MethodDecl md = cls.methods.get(m);
+                if (md.isNative) {
+                    md.cName = md.name;
+                } else if (this.isNameOverloadedInProgram(md.name)) {
+                    md.cName = cls.name.concat("_").concat(md.name).concat(this.mangleSuffix(md));
+                } else {
+                    md.cName = cls.name.concat("_").concat(md.name);
+                }
+                m = m + 1;
+            }
+            i = i + 1;
+        }
     }
 
     private int classDepth(ClassDecl cls) {
@@ -472,7 +604,8 @@ public class Sema {
                             int foundIdx = -1;
                             int v = 0;
                             while (v < cls.vtable.size()) {
-                                if (cls.vtable.get(v).name.equals(md.name)) {
+                                MethodDecl vm = cls.vtable.get(v);
+                                if (vm.name.equals(md.name) && this.sameParamTypes(vm, md)) {
                                     foundIdx = v;
                                     break;
                                 }
@@ -480,10 +613,10 @@ public class Sema {
                             }
                             if (foundIdx >= 0) {
                                 MethodDecl base = cls.vtable.get(foundIdx);
-                                if (!this.methodsCompatible(md, base)) {
+                                if (!this.typesEqual(md.returnType, base.returnType)) {
                                     this.errorAt(md.line, md.col,
                                         "override of '".concat(md.name)
-                                        .concat("' has incompatible signature"));
+                                        .concat("' has incompatible return type"));
                                     return false;
                                 }
                                 md.vtableIndex = foundIdx;
@@ -503,29 +636,58 @@ public class Sema {
         return this.verifyInterfaces();
     }
 
+    private MethodDecl findConcreteImpl(ClassDecl cls, MethodDecl target) {
+        ClassDecl c = cls;
+        while (c != null) {
+            int i = 0;
+            while (i < c.methods.size()) {
+                MethodDecl md = c.methods.get(i);
+                if (!md.isStatic && md.name.equals(target.name) && this.sameParamTypes(md, target)) {
+                    return md;
+                }
+                i = i + 1;
+            }
+            c = c.superClass;
+        }
+        return null;
+    }
+
     private boolean verifyInterfaces() {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
             if (!cls.isInterface) {
+                if (!cls.isAbstract) {
+                    int v = 0;
+                    while (v < cls.vtable.size()) {
+                        MethodDecl vm = cls.vtable.get(v);
+                        if (vm.isAbstract) {
+                            this.errorAt(cls.line, cls.col,
+                                "class '".concat(cls.name)
+                                .concat("' must implement abstract method '").concat(vm.name).concat("'"));
+                            return false;
+                        }
+                        v = v + 1;
+                    }
+                }
                 int k = 0;
                 while (k < cls.impls.size()) {
                     ClassDecl iface = cls.impls.get(k);
                     int m = 0;
                     while (m < iface.methods.size()) {
                         MethodDecl im = iface.methods.get(m);
-                        MethodDecl impl = this.findMethodInHierarchy(cls, im.name);
-                        if (impl == null || impl.isStatic) {
+                        MethodDecl impl = this.findConcreteImpl(cls, im);
+                        if (impl == null || impl.isStatic || (impl.isAbstract && !cls.isAbstract)) {
                             this.errorAt(cls.line, cls.col,
                                 "class '".concat(cls.name)
                                 .concat("' does not implement interface method '")
                                 .concat(iface.name).concat(".").concat(im.name).concat("'"));
                             return false;
                         }
-                        if (!this.methodsCompatible(impl, im)) {
+                        if (!this.typesEqual(impl.returnType, im.returnType)) {
                             this.errorAt(impl.line, impl.col,
                                 "method '".concat(cls.name).concat(".").concat(impl.name)
-                                .concat("' has incompatible signature for interface '")
+                                .concat("' has incompatible return type for interface '")
                                 .concat(iface.name).concat("'"));
                             return false;
                         }
@@ -569,6 +731,93 @@ public class Sema {
             }
             i = i + 1;
         }
+    }
+
+    private boolean argsMatch(MethodDecl m, ExprList args, boolean exact) {
+        if (m.params.size() != args.size()) {
+            return false;
+        }
+        int i = 0;
+        while (i < args.size()) {
+            Type expected = m.params.get(i).type;
+            Expr a = args.get(i);
+            if (exact) {
+                if (!this.typesEqual(expected, a.inferredType)) {
+                    return false;
+                }
+            } else {
+                if (!this.exprAssignable(expected, a)) {
+                    return false;
+                }
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    private MethodDecl resolveMethodOverload(ClassDecl cls, String name, ExprList args,
+                                             boolean wantStatic, boolean mustMatchStatic,
+                                             int line, int col) {
+        int i = 0;
+        while (i < args.size()) {
+            this.checkExpr(args.get(i));
+            if (this.hadError) return null;
+            i = i + 1;
+        }
+        int pass = 0;
+        while (pass < 2) {
+            boolean exact = (pass == 0);
+            ClassDecl c = cls;
+            while (c != null) {
+                int m = 0;
+                while (m < c.methods.size()) {
+                    MethodDecl md = c.methods.get(m);
+                    if (md.name.equals(name) &&
+                        (!mustMatchStatic || md.isStatic == wantStatic) &&
+                        this.argsMatch(md, args, exact)) {
+                        return md;
+                    }
+                    m = m + 1;
+                }
+                c = c.superClass;
+            }
+            pass = pass + 1;
+        }
+        this.errorAt(line, col, "no matching method '".concat(cls.name).concat(".").concat(name)
+            .concat("' for ").concat(String.fromInt(args.size())).concat(" argument(s)"));
+        return null;
+    }
+
+    private MethodDecl resolveCtorOverload(ClassDecl cls, ExprList args, int line, int col) {
+        int i = 0;
+        while (i < args.size()) {
+            this.checkExpr(args.get(i));
+            if (this.hadError) return null;
+            i = i + 1;
+        }
+        if (cls.constructors.size() == 0) {
+            if (args.size() != 0) {
+                this.errorAt(line, col, "'".concat(cls.name).concat("' expects 0 argument(s), got ")
+                    .concat(String.fromInt(args.size())));
+            }
+            return null;
+        }
+        int pass = 0;
+        while (pass < 2) {
+            boolean exact = (pass == 0);
+            int c = 0;
+            while (c < cls.constructors.size()) {
+                MethodDecl ctor = cls.constructors.get(c);
+                if (this.argsMatch(ctor, args, exact)) {
+                    return ctor;
+                }
+                c = c + 1;
+            }
+            pass = pass + 1;
+        }
+        this.errorAt(line, col, "no matching constructor for '".concat(cls.name)
+            .concat("' with ").concat(String.fromInt(args.size())).concat(" argument(s)"));
+        return null;
     }
 
     private void checkExpr(Expr e) {
@@ -677,11 +926,56 @@ public class Sema {
         if (k == ExprKind.CAST()) {
             this.checkExpr(e.left);
             if (this.hadError) return;
-            if (!this.isNumeric(e.left.inferredType)) {
-                this.errorAt(e.line, e.col, "cast requires numeric operand");
+            if (!this.resolveType(e.elemType, e.line, e.col)) {
                 return;
             }
-            e.inferredType = e.elemType;
+            Type src = e.left.inferredType;
+            if (e.elemType.kind == TypeKind.INT() || e.elemType.kind == TypeKind.BYTE()) {
+                if (!this.isNumeric(src)) {
+                    this.errorAt(e.line, e.col, "numeric cast requires numeric operand");
+                    return;
+                }
+                e.inferredType = e.elemType;
+                return;
+            }
+            if (e.elemType.kind == TypeKind.CLASS()) {
+                if (src == null || (src.kind != TypeKind.CLASS() && src.kind != TypeKind.NULL())) {
+                    this.errorAt(e.line, e.col, "reference cast requires class, interface, or null operand");
+                    return;
+                }
+                if (src.kind == TypeKind.CLASS()) {
+                    ClassDecl sc = src.resolvedClass;
+                    ClassDecl dc = e.elemType.resolvedClass;
+                    if (!sc.isInterface && !dc.isInterface &&
+                        !this.isSubtype(sc, dc) && !this.isSubtype(dc, sc)) {
+                        this.errorAt(e.line, e.col,
+                            "inconvertible types: cannot cast '".concat(sc.name)
+                            .concat("' to '").concat(dc.name).concat("'"));
+                        return;
+                    }
+                }
+                e.inferredType = e.elemType;
+                return;
+            }
+            this.errorAt(e.line, e.col, "unsupported cast target type");
+            return;
+        }
+        if (k == ExprKind.INSTANCEOF()) {
+            this.checkExpr(e.left);
+            if (this.hadError) return;
+            if (!this.resolveType(e.elemType, e.line, e.col)) {
+                return;
+            }
+            if (e.elemType.kind != TypeKind.CLASS()) {
+                this.errorAt(e.line, e.col, "'instanceof' requires a class or interface type");
+                return;
+            }
+            Type src = e.left.inferredType;
+            if (src == null || (src.kind != TypeKind.CLASS() && src.kind != TypeKind.NULL())) {
+                this.errorAt(e.line, e.col, "'instanceof' operand must be a class, interface, or null");
+                return;
+            }
+            e.inferredType = this.tyBoolean;
             return;
         }
         if (k == ExprKind.COMPOUND_ASSIGN()) {
@@ -777,8 +1071,21 @@ public class Sema {
             this.checkExpr(obj);
             if (this.hadError) return;
             if (obj.kind == ExprKind.IDENT() && obj.isClassRef) {
-                this.errorAt(e.line, e.col, "cannot access field '".concat(e.name)
-                    .concat("' on class '").concat(obj.name).concat("' without an instance"));
+                ClassDecl owner = this.findFieldOwner(obj.inferredType.resolvedClass, e.name);
+                if (owner == null) {
+                    this.errorAt(e.line, e.col, "class '".concat(obj.name)
+                        .concat("' has no static field '").concat(e.name).concat("'"));
+                    return;
+                }
+                FieldDecl fld = this.findField(owner, e.name);
+                if (!fld.isStatic) {
+                    this.errorAt(e.line, e.col, "cannot access instance field '".concat(e.name)
+                        .concat("' on class '").concat(obj.name).concat("' without an instance"));
+                    return;
+                }
+                e.isStaticField = true;
+                e.resolvedClass = owner;
+                e.inferredType = fld.type;
                 return;
             }
             Type objTy = obj.inferredType;
@@ -799,6 +1106,11 @@ public class Sema {
                     return;
                 }
                 FieldDecl fld = this.findField(owner, e.name);
+                if (fld.isStatic) {
+                    this.errorAt(e.line, e.col, "static field '".concat(e.name)
+                        .concat("' must be accessed via class name"));
+                    return;
+                }
                 e.resolvedClass = owner;
                 e.inferredType = fld.type;
                 return;
@@ -835,9 +1147,9 @@ public class Sema {
                 }
                 this.currentMethod.hasSuperCall = true;
                 ClassDecl sup = this.currentClass.superClass;
-                this.checkArgs(sup.name, sup.constructor, e.args, e.line, e.col);
+                MethodDecl ctor = this.resolveCtorOverload(sup, e.args, e.line, e.col);
                 e.resolvedClass = sup;
-                e.resolvedMethod = sup.constructor;
+                e.resolvedMethod = ctor;
                 e.inferredType = this.tyVoid;
                 return;
             }
@@ -851,25 +1163,11 @@ public class Sema {
                     return;
                 }
                 ClassDecl cls = obj.inferredType.resolvedClass;
-                MethodDecl m = this.findMethodInHierarchy(cls, mname);
-                if (m == null) {
-                    this.errorAt(e.line, e.col, "class '".concat(cls.name)
-                        .concat("' has no method '").concat(mname).concat("'"));
-                    return;
-                }
                 boolean isClassCall = (obj.kind == ExprKind.IDENT() && obj.isClassRef);
-                if (isClassCall && !m.isStatic) {
-                    this.errorAt(e.line, e.col, "cannot call instance method '"
-                        .concat(cls.name).concat(".").concat(mname).concat("' in static context"));
+                MethodDecl m = this.resolveMethodOverload(cls, mname, e.args, isClassCall, true, e.line, e.col);
+                if (m == null) {
                     return;
                 }
-                if (!isClassCall && m.isStatic) {
-                    this.errorAt(e.line, e.col, "static method '"
-                        .concat(cls.name).concat(".").concat(mname)
-                        .concat("' must be called on the class name"));
-                    return;
-                }
-                this.checkArgs(mname, m, e.args, e.line, e.col);
                 e.resolvedClass = cls;
                 e.resolvedMethod = m;
                 e.inferredType = m.returnType;
@@ -877,14 +1175,10 @@ public class Sema {
             }
             if (callee.kind == ExprKind.IDENT()) {
                 String mname = callee.name;
-                MethodDecl m = this.findMethod(this.currentClass, mname);
-                if (m == null || !m.isStatic) {
-                    this.errorAt(e.line, e.col, "method '".concat(mname)
-                        .concat("' not found (use 'this.").concat(mname)
-                        .concat("()' for instance methods)"));
+                MethodDecl m = this.resolveMethodOverload(this.currentClass, mname, e.args, true, true, e.line, e.col);
+                if (m == null) {
                     return;
                 }
-                this.checkArgs(mname, m, e.args, e.line, e.col);
                 e.resolvedMethod = m;
                 e.inferredType = m.returnType;
                 return;
@@ -902,8 +1196,12 @@ public class Sema {
                 this.errorAt(e.line, e.col, "cannot instantiate interface '".concat(e.name).concat("'"));
                 return;
             }
+            if (cls.isAbstract) {
+                this.errorAt(e.line, e.col, "cannot instantiate abstract class '".concat(e.name).concat("'"));
+                return;
+            }
             e.resolvedClass = cls;
-            this.checkArgs(cls.name, cls.constructor, e.args, e.line, e.col);
+            e.resolvedMethod = this.resolveCtorOverload(cls, e.args, e.line, e.col);
             e.inferredType = Type.makeResolvedClass(cls);
             return;
         }
@@ -1115,6 +1413,20 @@ public class Sema {
         this.popScope();
     }
 
+    private boolean hasZeroArgCtor(ClassDecl cls) {
+        if (cls.constructors.size() == 0) {
+            return true;
+        }
+        int c = 0;
+        while (c < cls.constructors.size()) {
+            if (cls.constructors.get(c).params.size() == 0) {
+                return true;
+            }
+            c = c + 1;
+        }
+        return false;
+    }
+
     public boolean analyze() {
         if (!this.pass1Register()) {
             return false;
@@ -1122,27 +1434,33 @@ public class Sema {
         int i = 0;
         while (i < this.prog.classes.size() && !this.hadError) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (cls.constructor != null) {
-                this.checkMethod(cls, cls.constructor);
-                if (!this.hadError && cls.superClass != null && !cls.constructor.hasSuperCall) {
-                    if (cls.superClass.constructor != null &&
-                        cls.superClass.constructor.params.size() > 0) {
-                        this.errorAt(cls.constructor.line, cls.constructor.col,
-                            "constructor must call 'super(...)' for superclass '"
-                            .concat(cls.superClass.name).concat("'"));
+            if (!cls.isInterface) {
+                if (cls.constructors.size() == 0) {
+                    if (cls.superClass != null && !this.hasZeroArgCtor(cls.superClass)) {
+                        this.errorAt(cls.line, cls.col,
+                            "class '".concat(cls.name)
+                            .concat("' must define a constructor calling 'super(...)'"));
+                    }
+                } else {
+                    int c = 0;
+                    while (c < cls.constructors.size() && !this.hadError) {
+                        MethodDecl ctor = cls.constructors.get(c);
+                        this.checkMethod(cls, ctor);
+                        if (!this.hadError && cls.superClass != null && !ctor.hasSuperCall) {
+                            if (!this.hasZeroArgCtor(cls.superClass)) {
+                                this.errorAt(ctor.line, ctor.col,
+                                    "constructor must call 'super(...)' for superclass '"
+                                    .concat(cls.superClass.name).concat("'"));
+                            }
+                        }
+                        c = c + 1;
                     }
                 }
-            } else if (cls.superClass != null &&
-                       cls.superClass.constructor != null &&
-                       cls.superClass.constructor.params.size() > 0) {
-                this.errorAt(cls.line, cls.col,
-                    "class '".concat(cls.name)
-                    .concat("' must define a constructor calling 'super(...)'"));
-            }
-            int m = 0;
-            while (m < cls.methods.size() && !this.hadError) {
-                this.checkMethod(cls, cls.methods.get(m));
-                m = m + 1;
+                int m = 0;
+                while (m < cls.methods.size() && !this.hadError) {
+                    this.checkMethod(cls, cls.methods.get(m));
+                    m = m + 1;
+                }
             }
             i = i + 1;
         }

@@ -24,6 +24,10 @@ typedef struct RtTypeInfo {
     int32_t ptr_count;
     const size_t* ptr_offsets;
     const void* vtable;
+    const struct RtTypeInfo* super;
+    int32_t iface_count;
+    const struct RtTypeInfo* const* interfaces;
+    const void* const* iface_vtables;
 } RtTypeInfo;
 
 typedef struct Obj {
@@ -55,6 +59,9 @@ static size_t rt_total_collections = 0;
 static size_t rt_total_freed = 0;
 static int rt_cli_argc = 0;
 static char** rt_cli_argv = NULL;
+static void** rt_static_roots = NULL;
+static size_t rt_static_root_count = 0;
+static size_t rt_static_root_cap = 0;
 
 static inline void rt_init(int argc, char** argv) {
     rt_all_objects = NULL;
@@ -65,6 +72,23 @@ static inline void rt_init(int argc, char** argv) {
     rt_total_freed = 0;
     rt_cli_argc = argc;
     rt_cli_argv = argv;
+    rt_static_roots = NULL;
+    rt_static_root_count = 0;
+    rt_static_root_cap = 0;
+}
+
+static inline void rt_gc_add_static_root(void* slot) {
+    if (rt_static_root_count >= rt_static_root_cap) {
+        size_t new_cap = rt_static_root_cap == 0 ? 16 : rt_static_root_cap * 2;
+        void** nr = (void**)realloc(rt_static_roots, new_cap * sizeof(void*));
+        if (!nr) {
+            fprintf(stderr, "moka runtime error: out of memory\n");
+            exit(1);
+        }
+        rt_static_roots = nr;
+        rt_static_root_cap = new_cap;
+    }
+    rt_static_roots[rt_static_root_count++] = slot;
 }
 
 static inline void rt_gc_mark_obj(Obj* obj) {
@@ -105,6 +129,13 @@ static inline void rt_gc_mark_roots(void) {
                 memcpy(&obj, f->slots[i], sizeof(Obj*));
                 rt_gc_mark_obj(obj);
             }
+        }
+    }
+    for (size_t i = 0; i < rt_static_root_count; i++) {
+        if (rt_static_roots[i] != NULL) {
+            Obj* obj = NULL;
+            memcpy(&obj, rt_static_roots[i], sizeof(Obj*));
+            rt_gc_mark_obj(obj);
         }
     }
 }
@@ -163,6 +194,10 @@ static inline void rt_shutdown(void) {
     rt_all_objects = NULL;
     rt_shadow_stack = NULL;
     rt_num_objects = 0;
+    free(rt_static_roots);
+    rt_static_roots = NULL;
+    rt_static_root_count = 0;
+    rt_static_root_cap = 0;
 }
 
 static inline void* rt_alloc_instance(size_t size, const RtTypeInfo* type_info) {
@@ -258,6 +293,62 @@ static inline void* rt_null_check(void* ptr, const char* context) {
         exit(1);
     }
     return ptr;
+}
+
+static inline bool rt_is_instance(const void* ptr, const RtTypeInfo* target) {
+    if (!ptr || !target) {
+        return false;
+    }
+    const Obj* obj = (const Obj*)ptr;
+    const RtTypeInfo* cur = obj->type_info;
+    while (cur != NULL) {
+        if (cur == target) {
+            return true;
+        }
+        for (int32_t i = 0; i < cur->iface_count; i++) {
+            if (cur->interfaces[i] == target) {
+                return true;
+            }
+        }
+        cur = cur->super;
+    }
+    return false;
+}
+
+static inline void* rt_cast_class(void* ptr, const RtTypeInfo* target) {
+    if (!ptr) {
+        return NULL;
+    }
+    if (!rt_is_instance(ptr, target)) {
+        const Obj* obj = (const Obj*)ptr;
+        const char* actual = (obj->type_info && obj->type_info->name) ? obj->type_info->name : "unknown";
+        const char* expected = (target && target->name) ? target->name : "unknown";
+        fprintf(stderr, "moka runtime error: ClassCastException: cannot cast '%s' to '%s'\n",
+                actual, expected);
+        exit(1);
+    }
+    return ptr;
+}
+
+static inline const void* rt_cast_iface_vtable(void* ptr, const RtTypeInfo* target) {
+    if (!ptr) {
+        return NULL;
+    }
+    const Obj* obj = (const Obj*)ptr;
+    const RtTypeInfo* cur = obj->type_info;
+    while (cur != NULL) {
+        for (int32_t i = 0; i < cur->iface_count; i++) {
+            if (cur->interfaces[i] == target) {
+                return cur->iface_vtables[i];
+            }
+        }
+        cur = cur->super;
+    }
+    const char* actual = (obj->type_info && obj->type_info->name) ? obj->type_info->name : "unknown";
+    const char* expected = (target && target->name) ? target->name : "unknown";
+    fprintf(stderr, "moka runtime error: ClassCastException: cannot cast '%s' to '%s'\n",
+            actual, expected);
+    exit(1);
 }
 
 /* =========================================================================

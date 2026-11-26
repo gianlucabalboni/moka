@@ -101,6 +101,8 @@ public class Lexer {
         if (s.equals("interface"))  return TokenKind.KW_INTERFACE();
         if (s.equals("implements")) return TokenKind.KW_IMPLEMENTS();
         if (s.equals("import"))     return TokenKind.KW_IMPORT();
+        if (s.equals("instanceof")) return TokenKind.KW_INSTANCEOF();
+        if (s.equals("abstract"))   return TokenKind.KW_ABSTRACT();
         return TokenKind.IDENT();
     }
 

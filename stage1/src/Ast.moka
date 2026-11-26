@@ -57,6 +57,7 @@ public class ExprKind {
     public static int CAST()            { return 15; }
     public static int COMPOUND_ASSIGN() { return 16; }
     public static int SUPER()           { return 17; }
+    public static int INSTANCEOF()      { return 18; }
 }
 
 public class UnaryOp {
@@ -106,6 +107,7 @@ public class Expr {
     public String name;
     public boolean isClassRef;
     public boolean isArrayLength;
+    public boolean isStaticField;
 
     /* Unary / Binary / Assign */
     public int op;
@@ -326,11 +328,14 @@ public class MethodDecl {
     public boolean isConstructor;
     public boolean isStatic;
     public boolean isNative;
+    public boolean isAbstract;
     public ParamList params;
     public Stmt body;
     public ClassDecl owner;
     public int vtableIndex;
     public boolean hasSuperCall;
+    public String cName;
+    public String cInitName;
     public int line;
     public int col;
 
@@ -341,6 +346,7 @@ public class MethodDecl {
         this.isConstructor = isConstructor;
         this.isStatic = isStatic;
         this.isNative = isNative;
+        this.isAbstract = false;
         this.params = new ParamList();
         this.vtableIndex = -1;
         this.hasSuperCall = false;
@@ -388,13 +394,14 @@ public class MethodList {
 public class ClassDecl {
     public String name;
     public boolean isInterface;
+    public boolean isAbstract;
     public String superName;
     public ClassDecl superClass;
     public String[] implNames;
     public int implCount;
     public ClassList impls;
     public FieldList fields;
-    public MethodDecl constructor;
+    public MethodList constructors;
     public MethodList methods;
     public MethodList vtable;
     public int line;
@@ -403,10 +410,12 @@ public class ClassDecl {
     public ClassDecl(String name, int line, int col) {
         this.name = name;
         this.isInterface = false;
+        this.isAbstract = false;
         this.implNames = new String[8];
         this.implCount = 0;
         this.impls = new ClassList();
         this.fields = new FieldList();
+        this.constructors = new MethodList();
         this.methods = new MethodList();
         this.vtable = new MethodList();
         this.line = line;
