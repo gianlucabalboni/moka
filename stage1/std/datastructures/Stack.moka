@@ -3,44 +3,44 @@ public class Stack<T> {
     private int count;
 
     public Stack() {
-        this.items = new T[8];
-        this.count = 0;
+        items = new T[8];
+        count = 0;
     }
 
     public int size() {
-        return this.count;
+        return count;
     }
 
     public boolean isEmpty() {
-        return this.count == 0;
+        return count == 0;
     }
 
     public void push(T item) {
-        if (this.count >= this.items.length) {
-            T[] next = new T[this.items.length * 2];
-            for (int i = 0; i < this.count; i++) {
-                next[i] = this.items[i];
+        if (count >= items.length) {
+            T[] next = new T[items.length * 2];
+            for (int i = 0; i < count; i++) {
+                next[i] = items[i];
             }
-            this.items = next;
+            items = next;
         }
-        this.items[this.count] = item;
-        this.count++;
+        items[count] = item;
+        count++;
     }
 
     public T pop() {
-        if (this.count == 0) {
+        if (count == 0) {
             throw new Exception("Stack underflow");
         }
-        this.count--;
-        T val = this.items[this.count];
-        this.items[this.count] = default(T);
+        count--;
+        T val = items[count];
+        items[count] = default(T);
         return val;
     }
 
     public T peek() {
-        if (this.count == 0) {
+        if (count == 0) {
             throw new Exception("Stack is empty");
         }
-        return this.items[this.count - 1];
+        return items[count - 1];
     }
 }

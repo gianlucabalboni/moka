@@ -5,59 +5,59 @@ public class ArrayList<T> implements List<T> {
     private int count;
 
     public ArrayList() {
-        this.items = new T[8];
-        this.count = 0;
+        items = new T[8];
+        count = 0;
     }
 
     public int size() {
-        return this.count;
+        return count;
     }
 
     public boolean isEmpty() {
-        return this.count == 0;
+        return count == 0;
     }
 
     public void add(T item) {
-        if (this.count >= this.items.length) {
-            T[] next = new T[this.items.length * 2];
-            for (int i = 0; i < this.count; i++) {
-                next[i] = this.items[i];
+        if (count >= items.length) {
+            T[] next = new T[items.length * 2];
+            for (int i = 0; i < count; i++) {
+                next[i] = items[i];
             }
-            this.items = next;
+            items = next;
         }
-        this.items[this.count] = item;
-        this.count++;
+        items[count] = item;
+        count++;
     }
 
     public T get(int index) {
-        if (index < 0 || index >= this.count) {
+        if (index < 0 || index >= count) {
             throw new Exception("ArrayList index out of bounds: " + index);
         }
-        return this.items[index];
+        return items[index];
     }
 
     public void set(int index, T item) {
-        if (index < 0 || index >= this.count) {
+        if (index < 0 || index >= count) {
             throw new Exception("ArrayList index out of bounds: " + index);
         }
-        this.items[index] = item;
+        items[index] = item;
     }
 
     public T removeAt(int index) {
-        if (index < 0 || index >= this.count) {
+        if (index < 0 || index >= count) {
             throw new Exception("ArrayList index out of bounds: " + index);
         }
-        T val = this.items[index];
-        for (int i = index; i < this.count - 1; i++) {
-            this.items[i] = this.items[i + 1];
+        T val = items[index];
+        for (int i = index; i < count - 1; i++) {
+            items[i] = items[i + 1];
         }
-        this.count--;
-        this.items[this.count] = default(T);
+        count--;
+        items[count] = default(T);
         return val;
     }
 
     public void clear() {
-        this.items = new T[8];
-        this.count = 0;
+        items = new T[8];
+        count = 0;
     }
 }

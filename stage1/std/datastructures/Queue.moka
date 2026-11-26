@@ -5,51 +5,51 @@ public class Queue<T> {
     private int count;
 
     public Queue() {
-        this.items = new T[8];
-        this.head = 0;
-        this.tail = 0;
-        this.count = 0;
+        items = new T[8];
+        head = 0;
+        tail = 0;
+        count = 0;
     }
 
     public int size() {
-        return this.count;
+        return count;
     }
 
     public boolean isEmpty() {
-        return this.count == 0;
+        return count == 0;
     }
 
     public void enqueue(T item) {
-        if (this.count >= this.items.length) {
-            int newCap = this.items.length * 2;
+        if (count >= items.length) {
+            int newCap = items.length * 2;
             T[] next = new T[newCap];
-            for (int i = 0; i < this.count; i++) {
-                next[i] = this.items[(this.head + i) % this.items.length];
+            for (int i = 0; i < count; i++) {
+                next[i] = items[(head + i) % items.length];
             }
-            this.items = next;
-            this.head = 0;
-            this.tail = this.count;
+            items = next;
+            head = 0;
+            tail = count;
         }
-        this.items[this.tail] = item;
-        this.tail = (this.tail + 1) % this.items.length;
-        this.count++;
+        items[tail] = item;
+        tail = (tail + 1) % items.length;
+        count++;
     }
 
     public T dequeue() {
-        if (this.count == 0) {
+        if (count == 0) {
             throw new Exception("Queue underflow");
         }
-        T val = this.items[this.head];
-        this.items[this.head] = default(T);
-        this.head = (this.head + 1) % this.items.length;
-        this.count--;
+        T val = items[head];
+        items[head] = default(T);
+        head = (head + 1) % items.length;
+        count--;
         return val;
     }
 
     public T peek() {
-        if (this.count == 0) {
+        if (count == 0) {
             throw new Exception("Queue is empty");
         }
-        return this.items[this.head];
+        return items[head];
     }
 }
