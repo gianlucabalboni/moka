@@ -361,6 +361,15 @@ public class Parser {
             this.expect(TokenKind.RPAREN(), "expected ')' after expression");
             return e;
         }
+        if (k == TokenKind.KW_DEFAULT() && this.t1.kind == TokenKind.LPAREN()) {
+            this.advanceTok();
+            this.advanceTok();
+            Type ty = this.parseType(false);
+            this.expect(TokenKind.RPAREN(), "expected ')' after type in 'default(...)'");
+            Expr e = new Expr(ExprKind.DEFAULT_VAL(), tok.line, tok.col);
+            e.elemType = ty;
+            return e;
+        }
         if (k == TokenKind.KW_NEW()) {
             this.advanceTok();
             boolean isDiamond = false;

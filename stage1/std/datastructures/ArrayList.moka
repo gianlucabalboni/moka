@@ -1,4 +1,4 @@
-import std/datastructure/List;
+import std/datastructures/List;
 
 public class ArrayList<T> implements List<T> {
     private T[] items;
@@ -52,8 +52,7 @@ public class ArrayList<T> implements List<T> {
             this.items[i] = this.items[i + 1];
         }
         this.count--;
-        T[] zero = new T[1];
-        this.items[this.count] = zero[0];
+        this.items[this.count] = default(T);
         return val;
     }
 

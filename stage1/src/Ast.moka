@@ -85,6 +85,7 @@ public class ExprKind {
     public static int LONG_LIT()        { return 19; }
     public static int DOUBLE_LIT()      { return 20; }
     public static int FLOAT_LIT()       { return 21; }
+    public static int DEFAULT_VAL()     { return 22; }
 }
 
 public class UnaryOp {

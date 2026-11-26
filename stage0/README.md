@@ -38,11 +38,6 @@ cc -std=c11 -Wall -Wextra -Werror -Isrc build/hello.c -o build/hello
 
 ---
 
-## Documentazione delle Milestone
+## Documentazione
 
-1. [Runtime & Memory Management](docs/01-runtime.md)
-2. [Lexer](docs/02-lexer.md)
-3. [AST & Parser](docs/03-parser.md)
-4. [Analisi Semantica](docs/04-sema.md)
-5. [Codegen C11](docs/05-codegen.md)
-6. [CLI `mokac` & `std/String.moka`](docs/06-cli-and-stdlib.md)
+Vedi la documentazione unificata in [`docs/it/internals.md`](../docs/it/internals.md) ([English](../docs/en/internals.md)).

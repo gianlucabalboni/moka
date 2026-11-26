@@ -439,6 +439,10 @@ public class Codegen {
             this.out.appendString("NULL");
             return;
         }
+        if (k == ExprKind.DEFAULT_VAL()) {
+            this.emitZeroValue(e.elemType);
+            return;
+        }
         if (k == ExprKind.THIS() || k == ExprKind.SUPER()) {
             this.out.appendString("this");
             return;

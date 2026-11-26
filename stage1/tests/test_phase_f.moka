@@ -1,10 +1,10 @@
 import std/Math;
-import std/datastructure/List;
-import std/datastructure/ArrayList;
-import std/datastructure/Stack;
-import std/datastructure/Queue;
-import std/datastructure/Map;
-import std/datastructure/StringMap;
+import std/datastructures/List;
+import std/datastructures/ArrayList;
+import std/datastructures/Stack;
+import std/datastructures/Queue;
+import std/datastructures/Map;
+import std/datastructures/StringMap;
 
 class Main {
     public static int main() {

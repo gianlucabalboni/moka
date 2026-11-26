@@ -9,7 +9,7 @@ final class Config {
     }
 
     public final int compute(int x) {
-        return x + this.id + this.version;
+        return x + id + version;
     }
 }
 
@@ -21,7 +21,10 @@ class BaseService {
 
 class SubService extends BaseService {
     public int extra() {
-        return 7;
+        if (tag().equals("base")) {
+            return 7;
+        }
+        return 0;
     }
 }
 

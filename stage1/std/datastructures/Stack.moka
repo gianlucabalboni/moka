@@ -33,8 +33,7 @@ public class Stack<T> {
         }
         this.count--;
         T val = this.items[this.count];
-        T[] zero = new T[1];
-        this.items[this.count] = zero[0];
+        this.items[this.count] = default(T);
         return val;
     }
 

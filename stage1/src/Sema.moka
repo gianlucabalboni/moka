@@ -1492,6 +1492,13 @@ public class Sema {
             e.inferredType = this.tyNull;
             return;
         }
+        if (k == ExprKind.DEFAULT_VAL()) {
+            if (!this.resolveType(e.elemType, e.line, e.col)) {
+                return;
+            }
+            e.inferredType = e.elemType;
+            return;
+        }
         if (k == ExprKind.STRING_LIT()) {
             ClassDecl strCls = this.findClass("String");
             if (strCls == null) {
@@ -1526,6 +1533,37 @@ public class Sema {
             if (local != null) {
                 e.inferredType = local;
                 return;
+            }
+            if (this.currentClass != null) {
+                ClassDecl owner = this.findFieldOwner(this.currentClass, e.name);
+                if (owner != null) {
+                    FieldDecl fld = this.findField(owner, e.name);
+                    if (fld.isStatic) {
+                        Expr clsRef = new Expr(ExprKind.IDENT(), e.line, e.col);
+                        clsRef.name = owner.name;
+                        clsRef.isClassRef = true;
+                        clsRef.inferredType = Type.makeResolvedClass(owner);
+                        e.kind = ExprKind.FIELD();
+                        e.left = clsRef;
+                        e.isStaticField = true;
+                        e.resolvedClass = owner;
+                        e.inferredType = fld.type;
+                        return;
+                    }
+                    if (this.currentMethod != null && this.currentMethod.isStatic) {
+                        this.errorAt(e.line, e.col,
+                            "cannot access non-static field '".concat(e.name).concat("' from a static context"));
+                        return;
+                    }
+                    Expr thisRef = new Expr(ExprKind.THIS(), e.line, e.col);
+                    thisRef.inferredType = Type.makeResolvedClass(this.currentClass);
+                    e.kind = ExprKind.FIELD();
+                    e.left = thisRef;
+                    e.isStaticField = false;
+                    e.resolvedClass = owner;
+                    e.inferredType = fld.type;
+                    return;
+                }
             }
             ClassDecl cls = this.findClass(e.name);
             if (cls != null) {
@@ -1860,9 +1898,19 @@ public class Sema {
             }
             if (callee.kind == ExprKind.IDENT()) {
                 String mname = callee.name;
-                MethodDecl m = this.resolveMethodOverload(this.currentClass, mname, e.args, e, true, true, e.line, e.col);
+                boolean inStatic = (this.currentMethod == null || this.currentMethod.isStatic);
+                MethodDecl m = this.resolveMethodOverload(this.currentClass, mname, e.args, e, true, inStatic, e.line, e.col);
                 if (m == null) {
                     return;
+                }
+                if (!m.isStatic) {
+                    Expr thisRef = new Expr(ExprKind.THIS(), callee.line, callee.col);
+                    thisRef.inferredType = Type.makeResolvedClass(this.currentClass);
+                    Expr fcal = new Expr(ExprKind.FIELD(), callee.line, callee.col);
+                    fcal.left = thisRef;
+                    fcal.name = mname;
+                    e.left = fcal;
+                    e.resolvedClass = this.currentClass;
                 }
                 e.resolvedMethod = m;
                 e.inferredType = m.returnType;

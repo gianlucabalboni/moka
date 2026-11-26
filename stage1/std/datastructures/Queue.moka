@@ -40,8 +40,7 @@ public class Queue<T> {
             throw new Exception("Queue underflow");
         }
         T val = this.items[this.head];
-        T[] zero = new T[1];
-        this.items[this.head] = zero[0];
+        this.items[this.head] = default(T);
         this.head = (this.head + 1) % this.items.length;
         this.count--;
         return val;

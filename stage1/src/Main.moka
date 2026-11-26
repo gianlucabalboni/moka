@@ -1,6 +1,6 @@
 public class Main {
     private static void printUsage() {
-        Console.eprintln("Usage: mokac <file1.moka> [file2.moka ...] [-o <output>] [--emit-c] [--keep-c] [--no-stdlib] [--runtime <header>] [--runtime-dir <dir>]");
+        Console.eprintln("Usage: mokac <file1.moka> [file2.moka ...] [-o <output>] [-r|--run] [--emit-c] [--keep-c] [--no-stdlib] [--std-dir <dir>] [--runtime <header>] [--runtime-dir <dir>]");
     }
 
     private static boolean endsWith(String s, String suffix) {
@@ -104,9 +104,12 @@ public class Main {
         String outPath = "";
         String runtimeHeader = "runtime.h";
         String runtimeDir = "";
+        String stdDir = "";
         boolean emitC = false;
         boolean keepC = false;
         boolean noStdlib = false;
+        boolean runAfter = false;
+        boolean explicitOut = false;
         boolean hasStringMoka = false;
 
         int i = 1;
@@ -122,12 +125,25 @@ public class Main {
                 }
                 i = i + 1;
                 outPath = Io.argv(i);
+                explicitOut = true;
+            } else if (arg.equals("-r") || arg.equals("--run")) {
+                runAfter = true;
             } else if (arg.equals("--emit-c")) {
                 emitC = true;
             } else if (arg.equals("--keep-c")) {
                 keepC = true;
             } else if (arg.equals("--no-stdlib")) {
                 noStdlib = true;
+            } else if (arg.equals("--std-dir")) {
+                if (i + 1 >= argc) {
+                    Console.eprintln("mokac error: missing directory after '--std-dir'");
+                    return 1;
+                }
+                i = i + 1;
+                stdDir = Io.argv(i);
+                if (stdDir.length() > 0 && stdDir.byteAt(stdDir.length() - 1) != '/') {
+                    stdDir = stdDir.concat("/");
+                }
             } else if (arg.equals("--runtime")) {
                 if (i + 1 >= argc) {
                     Console.eprintln("mokac error: missing header path after '--runtime'");
@@ -167,6 +183,8 @@ public class Main {
         if (outPath.equals("")) {
             if (emitC) {
                 outPath = "out.c";
+            } else if (runAfter) {
+                outPath = "/tmp/moka_run_tmp";
             } else {
                 outPath = "a.out";
             }
@@ -175,7 +193,9 @@ public class Main {
             emitC = true;
         }
 
-        String stdDir = Main.detectStdDir();
+        if (stdDir.equals("")) {
+            stdDir = Main.detectStdDir();
+        }
         String[] queue = new String[64];
         int queueCount = 0;
 
@@ -320,6 +340,28 @@ public class Main {
         if (rc != 0) {
             Console.eprintln("mokac error: C compilation failed");
             return 1;
+        }
+        if (runAfter) {
+            String runCmd = outPath;
+            boolean hasSlash = false;
+            int si = 0;
+            while (si < outPath.length()) {
+                if (outPath.byteAt(si) == '/') {
+                    hasSlash = true;
+                    break;
+                }
+                si = si + 1;
+            }
+            if (!hasSlash) {
+                runCmd = "./".concat(outPath);
+            }
+            int runRc = Io.exec(runCmd);
+            if (!explicitOut) {
+                Io.removeFile(outPath);
+            }
+            if (runRc != 0) {
+                return 1;
+            }
         }
         return 0;
     }

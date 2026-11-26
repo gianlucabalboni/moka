@@ -1,10 +1,10 @@
-public class Map<K, V> {
-    private K[] keys;
+public class StringMap<V> {
+    private String[] keys;
     private V[] values;
     private int count;
 
-    public Map() {
-        this.keys = new K[8];
+    public StringMap() {
+        this.keys = new String[8];
         this.values = new V[8];
         this.count = 0;
     }
@@ -17,20 +17,20 @@ public class Map<K, V> {
         return this.count == 0;
     }
 
-    private int indexOf(K key) {
+    private int indexOf(String key) {
         for (int i = 0; i < this.count; i++) {
-            if (this.keys[i] == key) {
+            if (this.keys[i] != null && this.keys[i].equals(key)) {
                 return i;
             }
         }
         return -1;
     }
 
-    public boolean containsKey(K key) {
+    public boolean containsKey(String key) {
         return this.indexOf(key) >= 0;
     }
 
-    public void put(K key, V value) {
+    public void put(String key, V value) {
         int idx = this.indexOf(key);
         if (idx >= 0) {
             this.values[idx] = value;
@@ -38,7 +38,7 @@ public class Map<K, V> {
         }
         if (this.count >= this.keys.length) {
             int newCap = this.keys.length * 2;
-            K[] nk = new K[newCap];
+            String[] nk = new String[newCap];
             V[] nv = new V[newCap];
             for (int i = 0; i < this.count; i++) {
                 nk[i] = this.keys[i];
@@ -52,27 +52,27 @@ public class Map<K, V> {
         this.count++;
     }
 
-    public V get(K key) {
+    public V get(String key) {
         int idx = this.indexOf(key);
         if (idx < 0) {
-            throw new Exception("Key not found in Map");
+            throw new Exception("Key not found in StringMap: " + key);
         }
         return this.values[idx];
     }
 
-    public V remove(K key) {
+    public V remove(String key) {
         int idx = this.indexOf(key);
         if (idx < 0) {
-            throw new Exception("Key not found in Map");
+            throw new Exception("Key not found in StringMap: " + key);
         }
         V val = this.values[idx];
         int last = this.count - 1;
-        this.keys[idx] = this.keys[last];
-        this.values[idx] = this.values[last];
-        K[] zk = new K[1];
-        V[] zv = new V[1];
-        this.keys[last] = zk[0];
-        this.values[last] = zv[0];
+        if (idx != last) {
+            this.keys[idx] = this.keys[last];
+            this.values[idx] = this.values[last];
+        }
+        this.keys[last] = null;
+        this.values[last] = default(V);
         this.count--;
         return val;
     }
