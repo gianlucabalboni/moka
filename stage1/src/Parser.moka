@@ -1,5 +1,8 @@
 public class Parser {
     private Lexer lex;
+    private Token[] toks;
+    private int tokPos;
+    private int tokCount;
     private Token t0;
     private Token t1;
     private Token t2;
@@ -15,10 +18,42 @@ public class Parser {
         this.importPaths = new String[16];
         this.importIsStd = new boolean[16];
         this.importCount = 0;
-        this.t0 = lex.next();
-        this.t1 = lex.next();
-        this.t2 = lex.next();
-        this.t3 = lex.next();
+
+        this.toks = new Token[256];
+        this.tokCount = 0;
+        this.tokPos = 0;
+        while (true) {
+            Token tk = lex.next();
+            if (this.tokCount >= this.toks.length) {
+                Token[] nt = new Token[this.toks.length * 2];
+                int i = 0;
+                while (i < this.tokCount) {
+                    nt[i] = this.toks[i];
+                    i = i + 1;
+                }
+                this.toks = nt;
+            }
+            this.toks[this.tokCount] = tk;
+            this.tokCount = this.tokCount + 1;
+            if (tk.kind == TokenKind.EOF()) {
+                break;
+            }
+        }
+        this.syncLookahead();
+    }
+
+    private void syncLookahead() {
+        this.t0 = this.tokAt(this.tokPos);
+        this.t1 = this.tokAt(this.tokPos + 1);
+        this.t2 = this.tokAt(this.tokPos + 2);
+        this.t3 = this.tokAt(this.tokPos + 3);
+    }
+
+    private Token tokAt(int idx) {
+        if (idx >= this.tokCount) {
+            return this.toks[this.tokCount - 1];
+        }
+        return this.toks[idx];
     }
 
     private Token peek() {
@@ -27,11 +62,56 @@ public class Parser {
 
     private Token advanceTok() {
         Token cur = this.t0;
-        this.t0 = this.t1;
-        this.t1 = this.t2;
-        this.t2 = this.t3;
-        this.t3 = this.lex.next();
+        if (this.tokPos < this.tokCount - 1) {
+            this.tokPos = this.tokPos + 1;
+        }
+        this.syncLookahead();
         return cur;
+    }
+
+    private void expectGt(String msg) {
+        if (this.t0.kind == TokenKind.GT()) {
+            this.advanceTok();
+            return;
+        }
+        if (this.t0.kind == TokenKind.SHR()) {
+            Token cur = this.t0;
+            this.toks[this.tokPos] = new Token(TokenKind.GT(), ">", cur.line, cur.col);
+            this.syncLookahead();
+            return;
+        }
+        this.errorAt(this.t0, msg);
+    }
+
+    private int skipAngleTypeArgs(int idx) {
+        if (this.tokAt(idx).kind != TokenKind.LT()) {
+            return -1;
+        }
+        int depth = 1;
+        idx = idx + 1;
+        while (idx < this.tokCount && depth > 0) {
+            int k = this.tokAt(idx).kind;
+            if (k == TokenKind.LT()) {
+                depth = depth + 1;
+            } else if (k == TokenKind.GT()) {
+                depth = depth - 1;
+            } else if (k == TokenKind.SHR()) {
+                depth = depth - 2;
+                if (depth < 0) {
+                    return -1;
+                }
+            } else if (k == TokenKind.SEMI() || k == TokenKind.LBRACE() ||
+                       k == TokenKind.RBRACE() || k == TokenKind.LPAREN() ||
+                       k == TokenKind.RPAREN() || k == TokenKind.EOF() ||
+                       k == TokenKind.ASSIGN()) {
+                return -1;
+            }
+            idx = idx + 1;
+        }
+        if (depth != 0) {
+            return -1;
+        }
+        return idx;
     }
 
     private void errorAt(Token tok, String msg) {
@@ -129,6 +209,22 @@ public class Parser {
             this.advanceTok();
             return new Type(TypeKind.BYTE());
         }
+        if (tok.kind == TokenKind.KW_CHAR()) {
+            this.advanceTok();
+            return new Type(TypeKind.CHAR());
+        }
+        if (tok.kind == TokenKind.KW_LONG()) {
+            this.advanceTok();
+            return new Type(TypeKind.LONG());
+        }
+        if (tok.kind == TokenKind.KW_DOUBLE()) {
+            this.advanceTok();
+            return new Type(TypeKind.DOUBLE());
+        }
+        if (tok.kind == TokenKind.KW_FLOAT()) {
+            this.advanceTok();
+            return new Type(TypeKind.FLOAT());
+        }
         if (tok.kind == TokenKind.KW_BOOLEAN()) {
             this.advanceTok();
             return new Type(TypeKind.BOOLEAN());
@@ -143,7 +239,18 @@ public class Parser {
         }
         if (tok.kind == TokenKind.IDENT()) {
             this.advanceTok();
-            return Type.makeClass(tok.lexeme);
+            Type t = Type.makeClass(tok.lexeme);
+            if (!this.hadError && this.t0.kind == TokenKind.LT() && this.t1.kind != TokenKind.GT()) {
+                this.advanceTok();
+                t.addTypeArg(this.parseType(false));
+                while (!this.hadError && this.match(TokenKind.COMMA())) {
+                    t.addTypeArg(this.parseType(false));
+                }
+                if (!this.hadError) {
+                    this.expectGt("expected '>' in generic type arguments");
+                }
+            }
+            return t;
         }
         this.errorAt(tok, "expected type name");
         return new Type(TypeKind.INT());
@@ -186,6 +293,24 @@ public class Parser {
             this.advanceTok();
             Expr e = new Expr(ExprKind.INT_LIT(), tok.line, tok.col);
             e.intVal = this.parseInt(tok.lexeme);
+            return e;
+        }
+        if (k == TokenKind.LONG_LIT()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.LONG_LIT(), tok.line, tok.col);
+            e.name = tok.lexeme;
+            return e;
+        }
+        if (k == TokenKind.DOUBLE_LIT()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.DOUBLE_LIT(), tok.line, tok.col);
+            e.name = tok.lexeme;
+            return e;
+        }
+        if (k == TokenKind.FLOAT_LIT()) {
+            this.advanceTok();
+            Expr e = new Expr(ExprKind.FLOAT_LIT(), tok.line, tok.col);
+            e.name = tok.lexeme;
             return e;
         }
         if (k == TokenKind.CHAR_LIT()) {
@@ -238,7 +363,19 @@ public class Parser {
         }
         if (k == TokenKind.KW_NEW()) {
             this.advanceTok();
-            Type base = this.parseBaseType(false);
+            boolean isDiamond = false;
+            Type base = null;
+            if (this.t0.kind == TokenKind.IDENT() &&
+                this.t1.kind == TokenKind.LT() &&
+                this.t2.kind == TokenKind.GT()) {
+                Token clsTok = this.advanceTok();
+                this.advanceTok();
+                this.advanceTok();
+                base = Type.makeClass(clsTok.lexeme);
+                isDiamond = true;
+            } else {
+                base = this.parseBaseType(false);
+            }
             if (this.hadError) {
                 return new Expr(ExprKind.NULL(), tok.line, tok.col);
             }
@@ -250,6 +387,9 @@ public class Parser {
                 this.advanceTok();
                 Expr e = new Expr(ExprKind.NEW_OBJ(), tok.line, tok.col);
                 e.name = base.className;
+                e.typeArgs = base.typeArgs;
+                e.typeArgCount = base.typeArgCount;
+                e.isDiamond = isDiamond;
                 e.args = this.parseArgList();
                 return e;
             }
@@ -288,6 +428,26 @@ public class Parser {
                 ix.left = expr;
                 ix.right = idx;
                 expr = ix;
+            } else if (tok.kind == TokenKind.LT() &&
+                       (expr.kind == ExprKind.IDENT() || expr.kind == ExprKind.FIELD())) {
+                int endIdx = this.skipAngleTypeArgs(this.tokPos);
+                if (endIdx >= 0 && this.tokAt(endIdx).kind == TokenKind.LPAREN()) {
+                    this.advanceTok(); /* '<' */
+                    Expr call = new Expr(ExprKind.CALL(), tok.line, tok.col);
+                    call.left = expr;
+                    call.addTypeArg(this.parseType(false));
+                    while (!this.hadError && this.match(TokenKind.COMMA())) {
+                        call.addTypeArg(this.parseType(false));
+                    }
+                    if (!this.hadError) {
+                        this.expectGt("expected '>' in generic method call");
+                    }
+                    this.expect(TokenKind.LPAREN(), "expected '('");
+                    call.args = this.parseArgList();
+                    expr = call;
+                } else {
+                    break;
+                }
             } else if (tok.kind == TokenKind.LPAREN()) {
                 this.advanceTok();
                 Expr call = new Expr(ExprKind.CALL(), tok.line, tok.col);
@@ -313,6 +473,8 @@ public class Parser {
 
     private boolean isExprStartKind(int k) {
         return k == TokenKind.IDENT() || k == TokenKind.INT_LIT() ||
+               k == TokenKind.LONG_LIT() || k == TokenKind.DOUBLE_LIT() ||
+               k == TokenKind.FLOAT_LIT() ||
                k == TokenKind.CHAR_LIT() || k == TokenKind.STRING_LIT() ||
                k == TokenKind.KW_TRUE() || k == TokenKind.KW_FALSE() ||
                k == TokenKind.KW_NULL() || k == TokenKind.KW_THIS() ||
@@ -322,12 +484,30 @@ public class Parser {
                k == TokenKind.MINUS_MINUS();
     }
 
+    private boolean isGenericCastAhead() {
+        if (this.t0.kind != TokenKind.LPAREN() || this.t1.kind != TokenKind.IDENT()) {
+            return false;
+        }
+        int endIdx = this.skipAngleTypeArgs(this.tokPos + 2);
+        if (endIdx < 0) {
+            return false;
+        }
+        if (this.tokAt(endIdx).kind != TokenKind.RPAREN()) {
+            return false;
+        }
+        return this.isExprStartKind(this.tokAt(endIdx + 1).kind);
+    }
+
     private Expr parseUnary() {
         Token tok = this.peek();
-        if (tok.kind == TokenKind.LPAREN() &&
-            ((this.t1.kind == TokenKind.KW_INT() || this.t1.kind == TokenKind.KW_BYTE()) ||
-             (this.t1.kind == TokenKind.IDENT() && this.isExprStartKind(this.t3.kind))) &&
-            this.t2.kind == TokenKind.RPAREN()) {
+        if ((tok.kind == TokenKind.LPAREN() &&
+             ((this.t1.kind == TokenKind.KW_INT() || this.t1.kind == TokenKind.KW_BYTE() ||
+               this.t1.kind == TokenKind.KW_CHAR() ||
+               this.t1.kind == TokenKind.KW_LONG() || this.t1.kind == TokenKind.KW_DOUBLE() ||
+               this.t1.kind == TokenKind.KW_FLOAT()) ||
+              (this.t1.kind == TokenKind.IDENT() && this.isExprStartKind(this.t3.kind))) &&
+             this.t2.kind == TokenKind.RPAREN()) ||
+            this.isGenericCastAhead()) {
             this.advanceTok(); /* '(' */
             Type targetTy = this.parseBaseType(false);
             this.expect(TokenKind.RPAREN(), "expected ')' in cast");
@@ -546,7 +726,10 @@ public class Parser {
 
     private boolean isVarDeclStart() {
         int k0 = this.t0.kind;
-        if (k0 == TokenKind.KW_INT() || k0 == TokenKind.KW_BYTE() || k0 == TokenKind.KW_BOOLEAN()) {
+        if (k0 == TokenKind.KW_FINAL() ||
+            k0 == TokenKind.KW_INT() || k0 == TokenKind.KW_BYTE() || k0 == TokenKind.KW_BOOLEAN() ||
+            k0 == TokenKind.KW_CHAR() ||
+            k0 == TokenKind.KW_LONG() || k0 == TokenKind.KW_DOUBLE() || k0 == TokenKind.KW_FLOAT()) {
             return true;
         }
         if (k0 == TokenKind.IDENT()) {
@@ -556,12 +739,25 @@ public class Parser {
             if (this.t1.kind == TokenKind.LBRACKET() && this.t2.kind == TokenKind.RBRACKET()) {
                 return true;
             }
+            if (this.t1.kind == TokenKind.LT()) {
+                int idx = this.skipAngleTypeArgs(this.tokPos + 1);
+                if (idx >= 0) {
+                    while (this.tokAt(idx).kind == TokenKind.LBRACKET() &&
+                           this.tokAt(idx + 1).kind == TokenKind.RBRACKET()) {
+                        idx = idx + 2;
+                    }
+                    if (this.tokAt(idx).kind == TokenKind.IDENT()) {
+                        return true;
+                    }
+                }
+            }
         }
         return false;
     }
 
     private Stmt parseVarDecl() {
         Token tok = this.peek();
+        boolean isFinal = this.match(TokenKind.KW_FINAL());
         Type ty = this.parseType(false);
         Token name = this.expect(TokenKind.IDENT(), "expected variable name");
         Expr init = null;
@@ -573,6 +769,7 @@ public class Parser {
         s.varType = ty;
         s.varName = name.lexeme;
         s.expr = init;
+        s.isFinal = isFinal;
         return s;
     }
 
@@ -726,6 +923,39 @@ public class Parser {
             s.expr = val;
             return s;
         }
+        if (tok.kind == TokenKind.KW_THROW()) {
+            this.advanceTok();
+            Expr val = this.parseExpr();
+            this.expect(TokenKind.SEMI(), "expected ';' after 'throw'");
+            Stmt s = new Stmt(StmtKind.THROW(), tok.line, tok.col);
+            s.expr = val;
+            return s;
+        }
+        if (tok.kind == TokenKind.KW_TRY()) {
+            this.advanceTok();
+            Stmt s = new Stmt(StmtKind.TRY(), tok.line, tok.col);
+            s.thenBranch = this.parseBlock();
+            s.stmts = new StmtList();
+            while (!this.hadError && this.t0.kind == TokenKind.KW_CATCH()) {
+                Token ctok = this.advanceTok();
+                this.expect(TokenKind.LPAREN(), "expected '(' after 'catch'");
+                Type ctype = this.parseType(false);
+                Token cname = this.expect(TokenKind.IDENT(), "expected exception variable name");
+                this.expect(TokenKind.RPAREN(), "expected ')' after catch parameter");
+                Stmt c = new Stmt(StmtKind.CATCH(), ctok.line, ctok.col);
+                c.varType = ctype;
+                c.varName = cname.lexeme;
+                c.thenBranch = this.parseBlock();
+                s.stmts.add(c);
+            }
+            if (!this.hadError && this.match(TokenKind.KW_FINALLY())) {
+                s.elseBranch = this.parseBlock();
+            }
+            if (!this.hadError && s.stmts.size() == 0 && s.elseBranch == null) {
+                this.errorAt(tok, "'try' without 'catch' or 'finally'");
+            }
+            return s;
+        }
         if (this.isVarDeclStart()) {
             return this.parseVarDecl();
         }
@@ -758,36 +988,66 @@ public class Parser {
     }
 
     private ClassDecl parseClass() {
-        if (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE()) {
+        boolean isAbstractCls = false;
+        boolean isFinalCls = false;
+        while (!this.hadError &&
+               (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE() ||
+                this.t0.kind == TokenKind.KW_ABSTRACT() || this.t0.kind == TokenKind.KW_FINAL())) {
+            if (this.t0.kind == TokenKind.KW_ABSTRACT()) {
+                isAbstractCls = true;
+            } else if (this.t0.kind == TokenKind.KW_FINAL()) {
+                isFinalCls = true;
+            }
             this.advanceTok();
         }
-        boolean isAbstractCls = this.match(TokenKind.KW_ABSTRACT());
         boolean isIface = false;
         Token classKw = this.peek();
         if (classKw.kind == TokenKind.KW_INTERFACE()) {
             if (isAbstractCls) {
                 this.errorAt(classKw, "'abstract' modifier cannot be used on 'interface'");
             }
+            if (isFinalCls) {
+                this.errorAt(classKw, "'final' modifier cannot be used on 'interface'");
+            }
             isIface = true;
             this.advanceTok();
         } else {
             classKw = this.expect(TokenKind.KW_CLASS(), "expected 'class' or 'interface'");
+            if (isAbstractCls && isFinalCls) {
+                this.errorAt(classKw, "class cannot be both 'abstract' and 'final'");
+            }
         }
         Token nameTok = this.expect(TokenKind.IDENT(), "expected type name");
         ClassDecl cls = new ClassDecl(nameTok.lexeme, classKw.line, classKw.col);
         cls.isInterface = isIface;
         cls.isAbstract = isAbstractCls;
+        cls.isFinal = isFinalCls;
+
+        if (!this.hadError && this.t0.kind == TokenKind.LT()) {
+            this.advanceTok();
+            Token tp = this.expect(TokenKind.IDENT(), "expected type parameter name");
+            cls.addTypeParam(tp.lexeme);
+            while (!this.hadError && this.match(TokenKind.COMMA())) {
+                tp = this.expect(TokenKind.IDENT(), "expected type parameter name");
+                cls.addTypeParam(tp.lexeme);
+            }
+            if (!this.hadError) {
+                this.expectGt("expected '>' after class type parameters");
+            }
+            cls.isGenericTemplate = true;
+        }
 
         if (!isIface && this.match(TokenKind.KW_EXTENDS())) {
-            Token supTok = this.expect(TokenKind.IDENT(), "expected superclass name after 'extends'");
-            cls.superName = supTok.lexeme;
+            Type st = this.parseBaseType(false);
+            cls.superType = st;
+            cls.superName = st.className;
         }
         if (!isIface && this.match(TokenKind.KW_IMPLEMENTS())) {
-            Token ifaceTok = this.expect(TokenKind.IDENT(), "expected interface name after 'implements'");
-            cls.addImplName(ifaceTok.lexeme);
+            Type it = this.parseBaseType(false);
+            cls.addImplSpec(it.className, it);
             while (!this.hadError && this.match(TokenKind.COMMA())) {
-                ifaceTok = this.expect(TokenKind.IDENT(), "expected interface name");
-                cls.addImplName(ifaceTok.lexeme);
+                it = this.parseBaseType(false);
+                cls.addImplSpec(it.className, it);
             }
         }
         this.expect(TokenKind.LBRACE(), "expected '{'");
@@ -795,10 +1055,10 @@ public class Parser {
         while (!this.hadError &&
                this.t0.kind != TokenKind.RBRACE() &&
                this.t0.kind != TokenKind.EOF()) {
-            if (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE()) {
-                this.advanceTok();
-            }
             if (isIface) {
+                if (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE()) {
+                    this.advanceTok();
+                }
                 Type retTy = this.parseType(true);
                 Token mName = this.expect(TokenKind.IDENT(), "expected interface method name");
                 MethodDecl m = new MethodDecl(mName.lexeme, retTy, false,
@@ -809,11 +1069,22 @@ public class Parser {
                 cls.methods.add(m);
                 continue;
             }
-            boolean isStatic = this.match(TokenKind.KW_STATIC());
-            boolean isNative = this.match(TokenKind.KW_NATIVE());
-            boolean isAbstract = this.match(TokenKind.KW_ABSTRACT());
+            boolean isStatic = false;
+            boolean isNative = false;
+            boolean isAbstract = false;
+            boolean isFinal = false;
+            while (!this.hadError &&
+                   (this.t0.kind == TokenKind.KW_PUBLIC() || this.t0.kind == TokenKind.KW_PRIVATE() ||
+                    this.t0.kind == TokenKind.KW_STATIC() || this.t0.kind == TokenKind.KW_NATIVE() ||
+                    this.t0.kind == TokenKind.KW_ABSTRACT() || this.t0.kind == TokenKind.KW_FINAL())) {
+                if (this.t0.kind == TokenKind.KW_STATIC())   isStatic = true;
+                if (this.t0.kind == TokenKind.KW_NATIVE())   isNative = true;
+                if (this.t0.kind == TokenKind.KW_ABSTRACT()) isAbstract = true;
+                if (this.t0.kind == TokenKind.KW_FINAL())    isFinal = true;
+                this.advanceTok();
+            }
 
-            if (!isStatic && !isNative && !isAbstract &&
+            if (!isStatic && !isNative && !isAbstract && !isFinal &&
                 this.t0.kind == TokenKind.IDENT() &&
                 this.t0.equals(cls.name) &&
                 this.t1.kind == TokenKind.LPAREN()) {
@@ -827,8 +1098,62 @@ public class Parser {
                 continue;
             }
 
+            /* Optional Java-style method type params: <T, U> RetType name(...) */
+            String[] javaTypeParams = null;
+            int javaTypeParamCount = 0;
+            if (!this.hadError && this.t0.kind == TokenKind.LT()) {
+                this.advanceTok();
+                javaTypeParams = new String[4];
+                Token tp = this.expect(TokenKind.IDENT(), "expected method type parameter name");
+                javaTypeParams[javaTypeParamCount] = tp.lexeme;
+                javaTypeParamCount = javaTypeParamCount + 1;
+                while (!this.hadError && this.match(TokenKind.COMMA())) {
+                    tp = this.expect(TokenKind.IDENT(), "expected method type parameter name");
+                    if (javaTypeParamCount >= javaTypeParams.length) {
+                        String[] ntp = new String[javaTypeParams.length * 2];
+                        int ti = 0;
+                        while (ti < javaTypeParamCount) {
+                            ntp[ti] = javaTypeParams[ti];
+                            ti = ti + 1;
+                        }
+                        javaTypeParams = ntp;
+                    }
+                    javaTypeParams[javaTypeParamCount] = tp.lexeme;
+                    javaTypeParamCount = javaTypeParamCount + 1;
+                }
+                if (!this.hadError) {
+                    this.expectGt("expected '>' after method type parameters");
+                }
+            }
+
             Type memberType = this.parseType(true);
             Token memberName = this.expect(TokenKind.IDENT(), "expected field or method name");
+
+            /* Optional simplified method type params: RetType name<T, U>(...) */
+            if (!this.hadError && javaTypeParamCount == 0 && this.t0.kind == TokenKind.LT()) {
+                this.advanceTok();
+                javaTypeParams = new String[4];
+                Token tp = this.expect(TokenKind.IDENT(), "expected method type parameter name");
+                javaTypeParams[javaTypeParamCount] = tp.lexeme;
+                javaTypeParamCount = javaTypeParamCount + 1;
+                while (!this.hadError && this.match(TokenKind.COMMA())) {
+                    tp = this.expect(TokenKind.IDENT(), "expected method type parameter name");
+                    if (javaTypeParamCount >= javaTypeParams.length) {
+                        String[] ntp = new String[javaTypeParams.length * 2];
+                        int ti = 0;
+                        while (ti < javaTypeParamCount) {
+                            ntp[ti] = javaTypeParams[ti];
+                            ti = ti + 1;
+                        }
+                        javaTypeParams = ntp;
+                    }
+                    javaTypeParams[javaTypeParamCount] = tp.lexeme;
+                    javaTypeParamCount = javaTypeParamCount + 1;
+                }
+                if (!this.hadError) {
+                    this.expectGt("expected '>' after method type parameters");
+                }
+            }
 
             if (!this.hadError && this.t0.kind == TokenKind.LPAREN()) {
                 if (isNative && !isStatic) {
@@ -843,10 +1168,23 @@ public class Parser {
                     this.errorAt(memberName, "'abstract' method must be inside an 'abstract' class");
                     break;
                 }
+                if (isFinal && isAbstract) {
+                    this.errorAt(memberName, "'abstract' methods cannot be 'final'");
+                    break;
+                }
                 MethodDecl m = new MethodDecl(memberName.lexeme, memberType, false,
                                               isStatic, isNative, memberName.line, memberName.col);
                 m.isAbstract = isAbstract;
+                m.isFinal = isFinal;
                 m.owner = cls;
+                int tpi = 0;
+                while (tpi < javaTypeParamCount) {
+                    m.addTypeParam(javaTypeParams[tpi]);
+                    tpi = tpi + 1;
+                }
+                if (javaTypeParamCount > 0) {
+                    m.isGenericTemplate = true;
+                }
                 m.params = this.parseParamList();
                 if (isNative || isAbstract) {
                     this.expect(TokenKind.SEMI(), "expected ';' after method declaration");
@@ -864,9 +1202,16 @@ public class Parser {
                     this.errorAt(memberName, "field cannot have type 'void'");
                     break;
                 }
+                Expr fldInit = null;
+                if (!this.hadError && this.match(TokenKind.ASSIGN())) {
+                    fldInit = this.parseExpr();
+                }
                 this.expect(TokenKind.SEMI(), "expected ';' after field declaration");
-                cls.fields.add(new FieldDecl(memberType, memberName.lexeme,
-                                             isStatic, memberName.line, memberName.col));
+                FieldDecl fd = new FieldDecl(memberType, memberName.lexeme,
+                                             isStatic, memberName.line, memberName.col);
+                fd.isFinal = isFinal;
+                fd.initExpr = fldInit;
+                cls.fields.add(fd);
             }
         }
 

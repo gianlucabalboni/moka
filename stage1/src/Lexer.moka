@@ -103,6 +103,15 @@ public class Lexer {
         if (s.equals("import"))     return TokenKind.KW_IMPORT();
         if (s.equals("instanceof")) return TokenKind.KW_INSTANCEOF();
         if (s.equals("abstract"))   return TokenKind.KW_ABSTRACT();
+        if (s.equals("long"))       return TokenKind.KW_LONG();
+        if (s.equals("double"))     return TokenKind.KW_DOUBLE();
+        if (s.equals("float"))      return TokenKind.KW_FLOAT();
+        if (s.equals("char"))       return TokenKind.KW_CHAR();
+        if (s.equals("try"))        return TokenKind.KW_TRY();
+        if (s.equals("catch"))      return TokenKind.KW_CATCH();
+        if (s.equals("finally"))    return TokenKind.KW_FINALLY();
+        if (s.equals("throw"))      return TokenKind.KW_THROW();
+        if (s.equals("final"))      return TokenKind.KW_FINAL();
         return TokenKind.IDENT();
     }
 
@@ -212,8 +221,35 @@ public class Lexer {
             while (!this.isAtEnd() && this.isDigit(this.peek())) {
                 this.advance();
             }
-            return new Token(TokenKind.INT_LIT(),
-                             this.slice(startPos, this.pos), startLine, startCol);
+            if (!this.isAtEnd() && this.peek() == '.' && this.isDigit(this.peekNext())) {
+                this.advance();
+                while (!this.isAtEnd() && this.isDigit(this.peek())) {
+                    this.advance();
+                }
+                String numLex = this.slice(startPos, this.pos);
+                if (!this.isAtEnd() && (this.peek() == 'f' || this.peek() == 'F')) {
+                    this.advance();
+                    return new Token(TokenKind.FLOAT_LIT(), numLex, startLine, startCol);
+                }
+                if (!this.isAtEnd() && (this.peek() == 'd' || this.peek() == 'D')) {
+                    this.advance();
+                }
+                return new Token(TokenKind.DOUBLE_LIT(), numLex, startLine, startCol);
+            }
+            String intLex = this.slice(startPos, this.pos);
+            if (!this.isAtEnd() && (this.peek() == 'L' || this.peek() == 'l')) {
+                this.advance();
+                return new Token(TokenKind.LONG_LIT(), intLex, startLine, startCol);
+            }
+            if (!this.isAtEnd() && (this.peek() == 'f' || this.peek() == 'F')) {
+                this.advance();
+                return new Token(TokenKind.FLOAT_LIT(), intLex, startLine, startCol);
+            }
+            if (!this.isAtEnd() && (this.peek() == 'd' || this.peek() == 'D')) {
+                this.advance();
+                return new Token(TokenKind.DOUBLE_LIT(), intLex, startLine, startCol);
+            }
+            return new Token(TokenKind.INT_LIT(), intLex, startLine, startCol);
         }
         if (c == '"') {
             return this.lexString(startPos, startLine, startCol);

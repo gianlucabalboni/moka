@@ -37,6 +37,18 @@ public class TokenKind {
     public static int KW_IMPORT()     { return 72; }
     public static int KW_INSTANCEOF() { return 73; }
     public static int KW_ABSTRACT()   { return 74; }
+    public static int KW_LONG()       { return 75; }
+    public static int KW_DOUBLE()     { return 76; }
+    public static int KW_FLOAT()      { return 77; }
+    public static int LONG_LIT()      { return 78; }
+    public static int DOUBLE_LIT()    { return 79; }
+    public static int FLOAT_LIT()     { return 80; }
+    public static int KW_CHAR()       { return 81; }
+    public static int KW_TRY()        { return 82; }
+    public static int KW_CATCH()      { return 83; }
+    public static int KW_FINALLY()    { return 84; }
+    public static int KW_THROW()      { return 85; }
+    public static int KW_FINAL()      { return 86; }
 
     public static int LPAREN()      { return 26; }
     public static int RPAREN()      { return 27; }
@@ -155,6 +167,18 @@ public class TokenKind {
         if (k == 72) return "import";
         if (k == 73) return "instanceof";
         if (k == 74) return "abstract";
+        if (k == 75) return "long";
+        if (k == 76) return "double";
+        if (k == 77) return "float";
+        if (k == 78) return "LONG_LIT";
+        if (k == 79) return "DOUBLE_LIT";
+        if (k == 80) return "FLOAT_LIT";
+        if (k == 81) return "char";
+        if (k == 82) return "try";
+        if (k == 83) return "catch";
+        if (k == 84) return "finally";
+        if (k == 85) return "throw";
+        if (k == 86) return "final";
         return "UNKNOWN";
     }
 }

@@ -1,0 +1,50 @@
+final class Config {
+    public static final int MAX_ITEMS = 100;
+    public static final String APP_NAME = "Moka";
+    public final int id;
+    public final int version = 2;
+
+    public Config(int id) {
+        this.id = id;
+    }
+
+    public final int compute(int x) {
+        return x + this.id + this.version;
+    }
+}
+
+class BaseService {
+    public final String tag() {
+        return "base";
+    }
+}
+
+class SubService extends BaseService {
+    public int extra() {
+        return 7;
+    }
+}
+
+class Main {
+    public static int main() {
+        final int offset = 10;
+        Config cfg = new Config(5);
+        SubService svc = new SubService();
+
+        if (Config.MAX_ITEMS != 100 || !Config.APP_NAME.equals("Moka")) {
+            Console.eprintln("static final field failed");
+            return 1;
+        }
+        if (cfg.compute(offset) != 17) {
+            Console.eprintln("final field/method/local failed");
+            return 1;
+        }
+        if (!svc.tag().equals("base") || svc.extra() != 7) {
+            Console.eprintln("inherited final method failed");
+            return 1;
+        }
+
+        Console.println("All Stage 1 final tests passed!");
+        return 0;
+    }
+}

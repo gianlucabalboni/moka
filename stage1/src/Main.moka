@@ -188,6 +188,8 @@ public class Main {
             queueCount = queueCount + 1;
             queue[queueCount] = stdDir.concat("Io.moka");
             queueCount = queueCount + 1;
+            queue[queueCount] = stdDir.concat("Exception.moka");
+            queueCount = queueCount + 1;
         }
 
         int u = 0;

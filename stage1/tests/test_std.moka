@@ -26,6 +26,12 @@ class Main {
         }
         Io.removeFile(path);
 
+        String[] args = Io.args();
+        if (args.length != Io.argc() || args.length < 1 || !args[0].equals(Io.argv(0))) {
+            Console.eprintln("Io.args test failed");
+            return 1;
+        }
+
         Console.println("All Stage 1 std tests passed!");
         return 0;
     }

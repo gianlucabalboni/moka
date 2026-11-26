@@ -1,10 +1,12 @@
 public class VarBinding {
     public String name;
     public Type type;
+    public boolean isFinal;
 
     public VarBinding(String name, Type type) {
         this.name = name;
         this.type = type;
+        this.isFinal = false;
     }
 }
 
@@ -31,6 +33,10 @@ public class Scope {
     }
 
     public void add(String name, Type type) {
+        this.addFinal(name, type, false);
+    }
+
+    public void addFinal(String name, Type type, boolean isFinal) {
         if (this.count >= this.vars.length) {
             VarBinding[] next = new VarBinding[this.vars.length * 2];
             int i = 0;
@@ -40,8 +46,25 @@ public class Scope {
             }
             this.vars = next;
         }
-        this.vars[this.count] = new VarBinding(name, type);
+        VarBinding vb = new VarBinding(name, type);
+        vb.isFinal = isFinal;
+        this.vars[this.count] = vb;
         this.count = this.count + 1;
+    }
+
+    public boolean lookupFinal(String name) {
+        Scope sc = this;
+        while (sc != null) {
+            int i = 0;
+            while (i < sc.count) {
+                if (sc.vars[i].name.equals(name)) {
+                    return sc.vars[i].isFinal;
+                }
+                i = i + 1;
+            }
+            sc = sc.parent;
+        }
+        return false;
     }
 
     public Type lookup(String name) {
@@ -74,6 +97,13 @@ public class Sema {
     private Type tyByte;
     private Type tyBoolean;
     private Type tyNull;
+    private Type tyLong;
+    private Type tyDouble;
+    private Type tyFloat;
+    private Type tyChar;
+    private Type expectedExprType;
+    private ClassList pendingClasses;
+    private MethodList pendingMethods;
 
     public Sema(Program prog) {
         this.prog = prog;
@@ -85,6 +115,13 @@ public class Sema {
         this.tyByte = new Type(TypeKind.BYTE());
         this.tyBoolean = new Type(TypeKind.BOOLEAN());
         this.tyNull = new Type(TypeKind.NULL());
+        this.tyLong = new Type(TypeKind.LONG());
+        this.tyDouble = new Type(TypeKind.DOUBLE());
+        this.tyFloat = new Type(TypeKind.FLOAT());
+        this.tyChar = new Type(TypeKind.CHAR());
+        this.expectedExprType = null;
+        this.pendingClasses = new ClassList();
+        this.pendingMethods = new MethodList();
     }
 
     private void errorAt(int line, int col, String msg) {
@@ -108,11 +145,15 @@ public class Sema {
     }
 
     private void scopeDeclare(String name, Type type, int line, int col) {
+        this.scopeDeclareFinal(name, type, false, line, col);
+    }
+
+    private void scopeDeclareFinal(String name, Type type, boolean isFinal, int line, int col) {
         if (this.scope.hasLocal(name)) {
             this.errorAt(line, col, "duplicate variable '".concat(name).concat("' in scope"));
             return;
         }
-        this.scope.add(name, type);
+        this.scope.addFinal(name, type, isFinal);
     }
 
     private ClassDecl findClass(String name) {
@@ -202,18 +243,277 @@ public class Sema {
         return false;
     }
 
+    private Type substType(Type t, String[] params, Type[] args, int paramCount) {
+        if (t == null) {
+            return null;
+        }
+        if (t.kind == TypeKind.ARRAY()) {
+            return Type.makeArray(this.substType(t.elem, params, args, paramCount));
+        }
+        if (t.kind == TypeKind.CLASS()) {
+            if (t.typeArgCount == 0 && t.resolvedClass == null) {
+                int i = 0;
+                while (i < paramCount) {
+                    if (params[i].equals(t.className)) {
+                        return args[i];
+                    }
+                    i = i + 1;
+                }
+            }
+            Type nt = Type.makeClass(t.className);
+            if (t.typeArgCount == 0) {
+                nt.resolvedClass = t.resolvedClass;
+            }
+            int i = 0;
+            while (i < t.typeArgCount) {
+                nt.addTypeArg(this.substType(t.typeArgs[i], params, args, paramCount));
+                i = i + 1;
+            }
+            return nt;
+        }
+        return new Type(t.kind);
+    }
+
+    private Expr cloneExpr(Expr e, String[] params, Type[] args, int paramCount) {
+        if (e == null) {
+            return null;
+        }
+        Expr c = new Expr(e.kind, e.line, e.col);
+        c.intVal = e.intVal;
+        c.charVal = e.charVal;
+        c.boolVal = e.boolVal;
+        c.strBytes = e.strBytes;
+        c.name = e.name;
+        c.op = e.op;
+        c.left = this.cloneExpr(e.left, params, args, paramCount);
+        c.right = this.cloneExpr(e.right, params, args, paramCount);
+        c.elemType = this.substType(e.elemType, params, args, paramCount);
+        c.isDiamond = e.isDiamond;
+        int i = 0;
+        while (i < e.typeArgCount) {
+            c.addTypeArg(this.substType(e.typeArgs[i], params, args, paramCount));
+            i = i + 1;
+        }
+        if (e.args != null) {
+            c.args = new ExprList();
+            int a = 0;
+            while (a < e.args.size()) {
+                c.args.add(this.cloneExpr(e.args.get(a), params, args, paramCount));
+                a = a + 1;
+            }
+        }
+        return c;
+    }
+
+    private Stmt cloneStmt(Stmt s, String[] params, Type[] args, int paramCount) {
+        if (s == null) {
+            return null;
+        }
+        Stmt c = new Stmt(s.kind, s.line, s.col);
+        c.varType = this.substType(s.varType, params, args, paramCount);
+        c.varName = s.varName;
+        c.expr = this.cloneExpr(s.expr, params, args, paramCount);
+        c.thenBranch = this.cloneStmt(s.thenBranch, params, args, paramCount);
+        c.elseBranch = this.cloneStmt(s.elseBranch, params, args, paramCount);
+        c.initStmt = this.cloneStmt(s.initStmt, params, args, paramCount);
+        c.stepExpr = this.cloneExpr(s.stepExpr, params, args, paramCount);
+        c.intVal = s.intVal;
+        c.isFinal = s.isFinal;
+        if (s.stmts != null) {
+            c.stmts = new StmtList();
+            int i = 0;
+            while (i < s.stmts.size()) {
+                c.stmts.add(this.cloneStmt(s.stmts.get(i), params, args, paramCount));
+                i = i + 1;
+            }
+        }
+        return c;
+    }
+
+    private ClassDecl instantiateClass(ClassDecl tmpl, Type[] args, int argCount, int line, int col) {
+        ByteBuffer nb = new ByteBuffer(32);
+        nb.appendString(tmpl.name);
+        int i = 0;
+        while (i < argCount) {
+            nb.appendString("__");
+            nb.appendString(this.mangleType(args[i]));
+            i = i + 1;
+        }
+        String mangledName = nb.toString();
+        ClassDecl existing = this.findClass(mangledName);
+        if (existing != null) {
+            return existing;
+        }
+
+        ClassDecl inst = new ClassDecl(mangledName, tmpl.line, tmpl.col);
+        inst.isInterface = tmpl.isInterface;
+        inst.isAbstract = tmpl.isAbstract;
+        inst.isFinal = tmpl.isFinal;
+        inst.isGenericTemplate = false;
+        inst.genericArgs = new Type[argCount];
+        inst.genericArgCount = argCount;
+        i = 0;
+        while (i < argCount) {
+            inst.genericArgs[i] = args[i];
+            i = i + 1;
+        }
+        this.prog.classes.add(inst);
+
+        if (tmpl.superType != null) {
+            Type st = this.substType(tmpl.superType, tmpl.typeParams, args, tmpl.typeParamCount);
+            if (!this.resolveType(st, line, col)) {
+                return inst;
+            }
+            if (st.resolvedClass.isInterface) {
+                this.errorAt(tmpl.line, tmpl.col, "cannot extend interface '".concat(st.resolvedClass.name).concat("'"));
+                return inst;
+            }
+            if (st.resolvedClass.isFinal) {
+                this.errorAt(tmpl.line, tmpl.col, "cannot inherit from final class '".concat(st.resolvedClass.name).concat("'"));
+                return inst;
+            }
+            inst.superType = st;
+            inst.superClass = st.resolvedClass;
+            inst.superName = inst.superClass.name;
+        }
+
+        i = 0;
+        while (i < tmpl.implCount) {
+            Type it = tmpl.implTypes[i];
+            if (it == null) {
+                it = Type.makeClass(tmpl.implNames[i]);
+            } else {
+                it = this.substType(it, tmpl.typeParams, args, tmpl.typeParamCount);
+            }
+            if (!this.resolveType(it, line, col)) {
+                return inst;
+            }
+            if (!it.resolvedClass.isInterface) {
+                this.errorAt(tmpl.line, tmpl.col, "cannot implement non-interface class '".concat(it.resolvedClass.name).concat("'"));
+                return inst;
+            }
+            inst.impls.add(it.resolvedClass);
+            i = i + 1;
+        }
+
+        int f = 0;
+        while (f < tmpl.fields.size()) {
+            FieldDecl fld = tmpl.fields.get(f);
+            FieldDecl nf = new FieldDecl(
+                this.substType(fld.type, tmpl.typeParams, args, tmpl.typeParamCount),
+                fld.name, fld.isStatic, fld.line, fld.col);
+            nf.isFinal = fld.isFinal;
+            nf.initExpr = this.cloneExpr(fld.initExpr, tmpl.typeParams, args, tmpl.typeParamCount);
+            if (!this.resolveType(nf.type, nf.line, nf.col)) {
+                return inst;
+            }
+            inst.fields.add(nf);
+            f = f + 1;
+        }
+
+        int c = 0;
+        while (c < tmpl.constructors.size()) {
+            MethodDecl ctor = tmpl.constructors.get(c);
+            MethodDecl nc = new MethodDecl(inst.name, this.tyVoid, true, false, false, ctor.line, ctor.col);
+            nc.owner = inst;
+            int p = 0;
+            while (p < ctor.params.size()) {
+                Param pm = ctor.params.get(p);
+                Type pt = this.substType(pm.type, tmpl.typeParams, args, tmpl.typeParamCount);
+                if (!this.resolveType(pt, pm.line, pm.col)) {
+                    return inst;
+                }
+                nc.params.add(new Param(pt, pm.name, pm.line, pm.col));
+                p = p + 1;
+            }
+            nc.body = this.cloneStmt(ctor.body, tmpl.typeParams, args, tmpl.typeParamCount);
+            inst.constructors.add(nc);
+            c = c + 1;
+        }
+
+        int m = 0;
+        while (m < tmpl.methods.size()) {
+            MethodDecl md = tmpl.methods.get(m);
+            Type retTy = md.returnType;
+            if (!md.isGenericTemplate) {
+                retTy = this.substType(md.returnType, tmpl.typeParams, args, tmpl.typeParamCount);
+            }
+            MethodDecl nm = new MethodDecl(
+                md.name, retTy,
+                false, md.isStatic, md.isNative, md.line, md.col);
+            nm.isAbstract = md.isAbstract;
+            nm.isFinal = md.isFinal;
+            nm.owner = inst;
+            nm.typeParams = md.typeParams;
+            nm.typeParamCount = md.typeParamCount;
+            nm.isGenericTemplate = md.isGenericTemplate;
+            if (!nm.isGenericTemplate && !this.resolveType(nm.returnType, nm.line, nm.col)) {
+                return inst;
+            }
+            int p = 0;
+            while (p < md.params.size()) {
+                Param pm = md.params.get(p);
+                Type pt = this.substType(pm.type, tmpl.typeParams, args, tmpl.typeParamCount);
+                if (!nm.isGenericTemplate && !this.resolveType(pt, pm.line, pm.col)) {
+                    return inst;
+                }
+                nm.params.add(new Param(pt, pm.name, pm.line, pm.col));
+                p = p + 1;
+            }
+            nm.body = this.cloneStmt(md.body, tmpl.typeParams, args, tmpl.typeParamCount);
+            inst.methods.add(nm);
+            m = m + 1;
+        }
+
+        this.assignMangledNamesForClass(inst);
+        if (!inst.isInterface) {
+            if (!this.buildVTableForClass(inst)) {
+                return inst;
+            }
+            if (!this.verifyInterfacesForClass(inst)) {
+                return inst;
+            }
+        }
+        this.pendingClasses.add(inst);
+        return inst;
+    }
+
     private boolean resolveType(Type ty, int line, int col) {
         if (ty == null) {
             return true;
         }
         if (ty.kind == TypeKind.CLASS()) {
+            int i = 0;
+            while (i < ty.typeArgCount) {
+                if (!this.resolveType(ty.typeArgs[i], line, col)) {
+                    return false;
+                }
+                i = i + 1;
+            }
             if (ty.resolvedClass == null) {
                 ClassDecl cls = this.findClass(ty.className);
                 if (cls == null) {
                     this.errorAt(line, col, "unknown type '".concat(ty.className).concat("'"));
                     return false;
                 }
-                ty.resolvedClass = cls;
+                if (cls.isGenericTemplate) {
+                    if (ty.typeArgCount != cls.typeParamCount) {
+                        this.errorAt(line, col, "generic type '".concat(cls.name)
+                            .concat("' expects ").concat(String.fromInt(cls.typeParamCount))
+                            .concat(" type argument(s), got ").concat(String.fromInt(ty.typeArgCount)));
+                        return false;
+                    }
+                    ClassDecl inst = this.instantiateClass(cls, ty.typeArgs, ty.typeArgCount, line, col);
+                    if (this.hadError) return false;
+                    ty.resolvedClass = inst;
+                    ty.className = inst.name;
+                } else {
+                    if (ty.typeArgCount > 0) {
+                        this.errorAt(line, col, "type '".concat(cls.name).concat("' is not generic"));
+                        return false;
+                    }
+                    ty.resolvedClass = cls;
+                }
             }
         } else if (ty.kind == TypeKind.ARRAY()) {
             return this.resolveType(ty.elem, line, col);
@@ -221,8 +521,44 @@ public class Sema {
         return true;
     }
 
+    private boolean isIntegral(Type ty) {
+        return ty != null && (ty.kind == TypeKind.INT() ||
+                              ty.kind == TypeKind.BYTE() ||
+                              ty.kind == TypeKind.CHAR() ||
+                              ty.kind == TypeKind.LONG());
+    }
+
     private boolean isNumeric(Type ty) {
-        return ty != null && (ty.kind == TypeKind.INT() || ty.kind == TypeKind.BYTE());
+        return ty != null && (ty.kind == TypeKind.INT() ||
+                              ty.kind == TypeKind.BYTE() ||
+                              ty.kind == TypeKind.CHAR() ||
+                              ty.kind == TypeKind.LONG() ||
+                              ty.kind == TypeKind.FLOAT() ||
+                              ty.kind == TypeKind.DOUBLE());
+    }
+
+    private int numericRank(Type ty) {
+        if (ty.kind == TypeKind.BYTE())   return 1;
+        if (ty.kind == TypeKind.CHAR())   return 1;
+        if (ty.kind == TypeKind.INT())    return 2;
+        if (ty.kind == TypeKind.LONG())   return 3;
+        if (ty.kind == TypeKind.FLOAT())  return 4;
+        if (ty.kind == TypeKind.DOUBLE()) return 5;
+        return 0;
+    }
+
+    private Type promoteNumeric(Type a, Type b) {
+        int ra = this.numericRank(a);
+        int rb = this.numericRank(b);
+        if (ra == 5 || rb == 5) return this.tyDouble;
+        if (ra == 4 || rb == 4) return this.tyFloat;
+        if (ra == 3 || rb == 3) return this.tyLong;
+        return this.tyInt;
+    }
+
+    private boolean isStringType(Type ty) {
+        return ty != null && ty.kind == TypeKind.CLASS() &&
+               ty.resolvedClass != null && ty.resolvedClass.name.equals("String");
     }
 
     private boolean isRefType(Type ty) {
@@ -255,9 +591,16 @@ public class Sema {
         if (target.kind == TypeKind.CLASS() && val.kind == TypeKind.CLASS()) {
             return this.isSubtype(val.resolvedClass, target.resolvedClass);
         }
-        if ((target.kind == TypeKind.INT() && val.kind == TypeKind.BYTE()) ||
-            (target.kind == TypeKind.BYTE() && val.kind == TypeKind.INT())) {
+        if ((target.kind == TypeKind.INT() || target.kind == TypeKind.BYTE() || target.kind == TypeKind.CHAR()) &&
+            (val.kind == TypeKind.INT() || val.kind == TypeKind.BYTE() || val.kind == TypeKind.CHAR())) {
             return true;
+        }
+        if (this.isNumeric(target) && this.isNumeric(val)) {
+            int rt = this.numericRank(target);
+            int rv = this.numericRank(val);
+            if (rv <= rt) {
+                return true;
+            }
         }
         if (val.kind == TypeKind.NULL() &&
             (target.kind == TypeKind.CLASS() || target.kind == TypeKind.ARRAY())) {
@@ -271,6 +614,10 @@ public class Sema {
         if (ty.kind == TypeKind.VOID())    return "void";
         if (ty.kind == TypeKind.INT())     return "int";
         if (ty.kind == TypeKind.BYTE())    return "byte";
+        if (ty.kind == TypeKind.CHAR())    return "char";
+        if (ty.kind == TypeKind.LONG())    return "long";
+        if (ty.kind == TypeKind.FLOAT())   return "float";
+        if (ty.kind == TypeKind.DOUBLE())  return "double";
         if (ty.kind == TypeKind.BOOLEAN()) return "boolean";
         if (ty.kind == TypeKind.NULL())    return "null";
         if (ty.kind == TypeKind.CLASS())   return ty.className;
@@ -301,11 +648,37 @@ public class Sema {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (cls.superName != null) {
+            if (cls.isGenericTemplate) {
+                i = i + 1;
+                continue;
+            }
+            if (cls.superType != null) {
+                if (!this.resolveType(cls.superType, cls.line, cls.col)) {
+                    return false;
+                }
+                ClassDecl sup = cls.superType.resolvedClass;
+                if (sup.isInterface) {
+                    this.errorAt(cls.line, cls.col,
+                        "cannot extend interface '".concat(sup.name).concat("'"));
+                    return false;
+                }
+                if (sup.isFinal) {
+                    this.errorAt(cls.line, cls.col,
+                        "cannot inherit from final class '".concat(sup.name).concat("'"));
+                    return false;
+                }
+                cls.superClass = sup;
+                cls.superName = sup.name;
+            } else if (cls.superName != null) {
                 ClassDecl sup = this.findClass(cls.superName);
                 if (sup == null) {
                     this.errorAt(cls.line, cls.col,
                         "unknown superclass '".concat(cls.superName).concat("'"));
+                    return false;
+                }
+                if (sup.isGenericTemplate) {
+                    this.errorAt(cls.line, cls.col,
+                        "generic class '".concat(cls.superName).concat("' requires type arguments"));
                     return false;
                 }
                 if (sup.isInterface) {
@@ -313,23 +686,41 @@ public class Sema {
                         "cannot extend interface '".concat(cls.superName).concat("'"));
                     return false;
                 }
+                if (sup.isFinal) {
+                    this.errorAt(cls.line, cls.col,
+                        "cannot inherit from final class '".concat(cls.superName).concat("'"));
+                    return false;
+                }
                 cls.superClass = sup;
             }
             int k = 0;
             while (k < cls.implCount) {
-                String iname = cls.implNames[k];
-                ClassDecl iface = this.findClass(iname);
-                if (iface == null) {
-                    this.errorAt(cls.line, cls.col,
-                        "unknown interface '".concat(iname).concat("'"));
-                    return false;
+                Type it = cls.implTypes[k];
+                if (it != null) {
+                    if (!this.resolveType(it, cls.line, cls.col)) {
+                        return false;
+                    }
+                    if (!it.resolvedClass.isInterface) {
+                        this.errorAt(cls.line, cls.col,
+                            "cannot implement non-interface class '".concat(it.resolvedClass.name).concat("'"));
+                        return false;
+                    }
+                    cls.impls.add(it.resolvedClass);
+                } else {
+                    String iname = cls.implNames[k];
+                    ClassDecl iface = this.findClass(iname);
+                    if (iface == null) {
+                        this.errorAt(cls.line, cls.col,
+                            "unknown interface '".concat(iname).concat("'"));
+                        return false;
+                    }
+                    if (!iface.isInterface) {
+                        this.errorAt(cls.line, cls.col,
+                            "cannot implement non-interface class '".concat(iname).concat("'"));
+                        return false;
+                    }
+                    cls.impls.add(iface);
                 }
-                if (!iface.isInterface) {
-                    this.errorAt(cls.line, cls.col,
-                        "cannot implement non-interface class '".concat(iname).concat("'"));
-                    return false;
-                }
-                cls.impls.add(iface);
                 k = k + 1;
             }
             i = i + 1;
@@ -337,14 +728,16 @@ public class Sema {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            ClassDecl cur = cls.superClass;
-            while (cur != null) {
-                if (cur == cls) {
-                    this.errorAt(cls.line, cls.col,
-                        "cyclic inheritance involving '".concat(cls.name).concat("'"));
-                    return false;
+            if (!cls.isGenericTemplate) {
+                ClassDecl cur = cls.superClass;
+                while (cur != null) {
+                    if (cur == cls) {
+                        this.errorAt(cls.line, cls.col,
+                            "cyclic inheritance involving '".concat(cls.name).concat("'"));
+                        return false;
+                    }
+                    cur = cur.superClass;
                 }
-                cur = cur.superClass;
             }
             i = i + 1;
         }
@@ -352,6 +745,10 @@ public class Sema {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
+            if (cls.isGenericTemplate) {
+                i = i + 1;
+                continue;
+            }
 
             int f = 0;
             while (f < cls.fields.size()) {
@@ -397,6 +794,10 @@ public class Sema {
             int m = 0;
             while (m < cls.methods.size()) {
                 MethodDecl meth = cls.methods.get(m);
+                if (meth.isGenericTemplate) {
+                    m = m + 1;
+                    continue;
+                }
                 if (!this.resolveType(meth.returnType, meth.line, meth.col)) {
                     return false;
                 }
@@ -444,6 +845,10 @@ public class Sema {
     private String mangleType(Type ty) {
         if (ty.kind == TypeKind.INT())     return "int";
         if (ty.kind == TypeKind.BYTE())    return "byte";
+        if (ty.kind == TypeKind.CHAR())    return "char";
+        if (ty.kind == TypeKind.LONG())    return "long";
+        if (ty.kind == TypeKind.FLOAT())   return "float";
+        if (ty.kind == TypeKind.DOUBLE())  return "double";
         if (ty.kind == TypeKind.BOOLEAN()) return "bool";
         if (ty.kind == TypeKind.VOID())    return "void";
         if (ty.kind == TypeKind.CLASS())   return ty.resolvedClass.name;
@@ -512,27 +917,28 @@ public class Sema {
         return false;
     }
 
-    private void assignMangledNames() {
-        int i = 0;
-        while (i < this.prog.classes.size()) {
-            ClassDecl cls = this.prog.classes.get(i);
-            boolean multiCtor = cls.constructors.size() > 1;
-            int c = 0;
-            while (c < cls.constructors.size()) {
-                MethodDecl ctor = cls.constructors.get(c);
-                if (multiCtor) {
-                    String suf = this.mangleSuffix(ctor);
-                    ctor.cName = cls.name.concat("_new").concat(suf);
-                    ctor.cInitName = cls.name.concat("_init").concat(suf);
-                } else {
-                    ctor.cName = cls.name.concat("_new");
-                    ctor.cInitName = cls.name.concat("_init");
-                }
-                c = c + 1;
+    private void assignMangledNamesForClass(ClassDecl cls) {
+        if (cls.isGenericTemplate) {
+            return;
+        }
+        boolean multiCtor = cls.constructors.size() > 1;
+        int c = 0;
+        while (c < cls.constructors.size()) {
+            MethodDecl ctor = cls.constructors.get(c);
+            if (multiCtor) {
+                String suf = this.mangleSuffix(ctor);
+                ctor.cName = cls.name.concat("_new").concat(suf);
+                ctor.cInitName = cls.name.concat("_init").concat(suf);
+            } else {
+                ctor.cName = cls.name.concat("_new");
+                ctor.cInitName = cls.name.concat("_init");
             }
-            int m = 0;
-            while (m < cls.methods.size()) {
-                MethodDecl md = cls.methods.get(m);
+            c = c + 1;
+        }
+        int m = 0;
+        while (m < cls.methods.size()) {
+            MethodDecl md = cls.methods.get(m);
+            if (!md.isGenericTemplate && md.cName == null) {
                 if (md.isNative) {
                     md.cName = md.name;
                 } else if (this.isNameOverloadedInProgram(md.name)) {
@@ -540,8 +946,15 @@ public class Sema {
                 } else {
                     md.cName = cls.name.concat("_").concat(md.name);
                 }
-                m = m + 1;
             }
+            m = m + 1;
+        }
+    }
+
+    private void assignMangledNames() {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            this.assignMangledNamesForClass(this.prog.classes.get(i));
             i = i + 1;
         }
     }
@@ -573,13 +986,72 @@ public class Sema {
         return true;
     }
 
+    private boolean buildVTableForClass(ClassDecl cls) {
+        if (cls.isInterface || cls.isGenericTemplate) {
+            return true;
+        }
+        if (cls.vtable.size() > 0) {
+            return true;
+        }
+        if (cls.superClass != null) {
+            if (!this.buildVTableForClass(cls.superClass)) {
+                return false;
+            }
+            int k = 0;
+            while (k < cls.superClass.vtable.size()) {
+                cls.vtable.add(cls.superClass.vtable.get(k));
+                k = k + 1;
+            }
+        }
+        int m = 0;
+        while (m < cls.methods.size()) {
+            MethodDecl md = cls.methods.get(m);
+            if (!md.isStatic && !md.isNative && !md.isGenericTemplate) {
+                int foundIdx = -1;
+                int v = 0;
+                while (v < cls.vtable.size()) {
+                    MethodDecl vm = cls.vtable.get(v);
+                    if (vm.name.equals(md.name) && this.sameParamTypes(vm, md)) {
+                        foundIdx = v;
+                        break;
+                    }
+                    v = v + 1;
+                }
+                if (foundIdx >= 0) {
+                    MethodDecl base = cls.vtable.get(foundIdx);
+                    if (base.isFinal) {
+                        this.errorAt(md.line, md.col,
+                            "cannot override final method '".concat(md.name).concat("'"));
+                        return false;
+                    }
+                    if (!this.typesEqual(md.returnType, base.returnType)) {
+                        this.errorAt(md.line, md.col,
+                            "override of '".concat(md.name)
+                            .concat("' has incompatible return type"));
+                        return false;
+                    }
+                    md.vtableIndex = foundIdx;
+                    cls.vtable.set(foundIdx, md);
+                } else {
+                    md.vtableIndex = cls.vtable.size();
+                    cls.vtable.add(md);
+                }
+            }
+            m = m + 1;
+        }
+        return true;
+    }
+
     private boolean buildVTables() {
         int maxDepth = 0;
         int i = 0;
         while (i < this.prog.classes.size()) {
-            int d = this.classDepth(this.prog.classes.get(i));
-            if (d > maxDepth) {
-                maxDepth = d;
+            ClassDecl c0 = this.prog.classes.get(i);
+            if (!c0.isGenericTemplate) {
+                int d = this.classDepth(c0);
+                if (d > maxDepth) {
+                    maxDepth = d;
+                }
             }
             i = i + 1;
         }
@@ -589,44 +1061,9 @@ public class Sema {
             i = 0;
             while (i < this.prog.classes.size()) {
                 ClassDecl cls = this.prog.classes.get(i);
-                if (!cls.isInterface && this.classDepth(cls) == depth) {
-                    if (cls.superClass != null) {
-                        int k = 0;
-                        while (k < cls.superClass.vtable.size()) {
-                            cls.vtable.add(cls.superClass.vtable.get(k));
-                            k = k + 1;
-                        }
-                    }
-                    int m = 0;
-                    while (m < cls.methods.size()) {
-                        MethodDecl md = cls.methods.get(m);
-                        if (!md.isStatic && !md.isNative) {
-                            int foundIdx = -1;
-                            int v = 0;
-                            while (v < cls.vtable.size()) {
-                                MethodDecl vm = cls.vtable.get(v);
-                                if (vm.name.equals(md.name) && this.sameParamTypes(vm, md)) {
-                                    foundIdx = v;
-                                    break;
-                                }
-                                v = v + 1;
-                            }
-                            if (foundIdx >= 0) {
-                                MethodDecl base = cls.vtable.get(foundIdx);
-                                if (!this.typesEqual(md.returnType, base.returnType)) {
-                                    this.errorAt(md.line, md.col,
-                                        "override of '".concat(md.name)
-                                        .concat("' has incompatible return type"));
-                                    return false;
-                                }
-                                md.vtableIndex = foundIdx;
-                                cls.vtable.set(foundIdx, md);
-                            } else {
-                                md.vtableIndex = cls.vtable.size();
-                                cls.vtable.add(md);
-                            }
-                        }
-                        m = m + 1;
+                if (!cls.isInterface && !cls.isGenericTemplate && this.classDepth(cls) == depth) {
+                    if (!this.buildVTableForClass(cls)) {
+                        return false;
                     }
                 }
                 i = i + 1;
@@ -652,49 +1089,57 @@ public class Sema {
         return null;
     }
 
+    private boolean verifyInterfacesForClass(ClassDecl cls) {
+        if (cls.isInterface || cls.isGenericTemplate) {
+            return true;
+        }
+        if (!cls.isAbstract) {
+            int v = 0;
+            while (v < cls.vtable.size()) {
+                MethodDecl vm = cls.vtable.get(v);
+                if (vm.isAbstract) {
+                    this.errorAt(cls.line, cls.col,
+                        "class '".concat(cls.name)
+                        .concat("' must implement abstract method '").concat(vm.name).concat("'"));
+                    return false;
+                }
+                v = v + 1;
+            }
+        }
+        int k = 0;
+        while (k < cls.impls.size()) {
+            ClassDecl iface = cls.impls.get(k);
+            int m = 0;
+            while (m < iface.methods.size()) {
+                MethodDecl im = iface.methods.get(m);
+                MethodDecl impl = this.findConcreteImpl(cls, im);
+                if (impl == null || impl.isStatic || (impl.isAbstract && !cls.isAbstract)) {
+                    this.errorAt(cls.line, cls.col,
+                        "class '".concat(cls.name)
+                        .concat("' does not implement interface method '")
+                        .concat(iface.name).concat(".").concat(im.name).concat("'"));
+                    return false;
+                }
+                if (!this.typesEqual(impl.returnType, im.returnType)) {
+                    this.errorAt(impl.line, impl.col,
+                        "method '".concat(cls.name).concat(".").concat(impl.name)
+                        .concat("' has incompatible return type for interface '")
+                        .concat(iface.name).concat("'"));
+                    return false;
+                }
+                m = m + 1;
+            }
+            k = k + 1;
+        }
+        return true;
+    }
+
     private boolean verifyInterfaces() {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (!cls.isInterface) {
-                if (!cls.isAbstract) {
-                    int v = 0;
-                    while (v < cls.vtable.size()) {
-                        MethodDecl vm = cls.vtable.get(v);
-                        if (vm.isAbstract) {
-                            this.errorAt(cls.line, cls.col,
-                                "class '".concat(cls.name)
-                                .concat("' must implement abstract method '").concat(vm.name).concat("'"));
-                            return false;
-                        }
-                        v = v + 1;
-                    }
-                }
-                int k = 0;
-                while (k < cls.impls.size()) {
-                    ClassDecl iface = cls.impls.get(k);
-                    int m = 0;
-                    while (m < iface.methods.size()) {
-                        MethodDecl im = iface.methods.get(m);
-                        MethodDecl impl = this.findConcreteImpl(cls, im);
-                        if (impl == null || impl.isStatic || (impl.isAbstract && !cls.isAbstract)) {
-                            this.errorAt(cls.line, cls.col,
-                                "class '".concat(cls.name)
-                                .concat("' does not implement interface method '")
-                                .concat(iface.name).concat(".").concat(im.name).concat("'"));
-                            return false;
-                        }
-                        if (!this.typesEqual(impl.returnType, im.returnType)) {
-                            this.errorAt(impl.line, impl.col,
-                                "method '".concat(cls.name).concat(".").concat(impl.name)
-                                .concat("' has incompatible return type for interface '")
-                                .concat(iface.name).concat("'"));
-                            return false;
-                        }
-                        m = m + 1;
-                    }
-                    k = k + 1;
-                }
+            if (!this.verifyInterfacesForClass(cls)) {
+                return false;
             }
             i = i + 1;
         }
@@ -755,7 +1200,88 @@ public class Sema {
         return true;
     }
 
+    private void inferTypeFromPattern(Type pat, Type actual, String[] tparams, Type[] inferred, int paramCount) {
+        if (pat == null || actual == null) {
+            return;
+        }
+        if (pat.kind == TypeKind.ARRAY() && actual.kind == TypeKind.ARRAY()) {
+            this.inferTypeFromPattern(pat.elem, actual.elem, tparams, inferred, paramCount);
+            return;
+        }
+        if (pat.kind == TypeKind.CLASS()) {
+            if (pat.typeArgCount == 0 && pat.resolvedClass == null) {
+                int i = 0;
+                while (i < paramCount) {
+                    if (tparams[i].equals(pat.className)) {
+                        if (inferred[i] == null && actual.kind != TypeKind.NULL()) {
+                            inferred[i] = actual;
+                        }
+                        return;
+                    }
+                    i = i + 1;
+                }
+            }
+            if (pat.typeArgCount > 0 && actual.kind == TypeKind.CLASS() &&
+                actual.resolvedClass != null &&
+                actual.resolvedClass.genericArgCount == pat.typeArgCount) {
+                int i = 0;
+                while (i < pat.typeArgCount) {
+                    this.inferTypeFromPattern(pat.typeArgs[i], actual.resolvedClass.genericArgs[i],
+                                              tparams, inferred, paramCount);
+                    i = i + 1;
+                }
+            }
+        }
+    }
+
+    private MethodDecl instantiateMethod(ClassDecl cls, MethodDecl tmpl, Type[] args, int argCount, int line, int col) {
+        ByteBuffer nb = new ByteBuffer(32);
+        nb.appendString(cls.name);
+        nb.appendByte('_');
+        nb.appendString(tmpl.name);
+        int i = 0;
+        while (i < argCount) {
+            nb.appendString("__");
+            nb.appendString(this.mangleType(args[i]));
+            i = i + 1;
+        }
+        String mangledCName = nb.toString();
+        int m = 0;
+        while (m < cls.methods.size()) {
+            MethodDecl ex = cls.methods.get(m);
+            if (!ex.isGenericTemplate && ex.cName != null && ex.cName.equals(mangledCName)) {
+                return ex;
+            }
+            m = m + 1;
+        }
+
+        Type retTy = this.substType(tmpl.returnType, tmpl.typeParams, args, tmpl.typeParamCount);
+        if (!this.resolveType(retTy, line, col)) {
+            return null;
+        }
+        MethodDecl nm = new MethodDecl(tmpl.name, retTy, false, tmpl.isStatic, tmpl.isNative, tmpl.line, tmpl.col);
+        nm.cName = mangledCName;
+        nm.owner = cls;
+        nm.isFinal = tmpl.isFinal;
+        nm.isGenericTemplate = false;
+        int p = 0;
+        while (p < tmpl.params.size()) {
+            Param pm = tmpl.params.get(p);
+            Type pt = this.substType(pm.type, tmpl.typeParams, args, tmpl.typeParamCount);
+            if (!this.resolveType(pt, line, col)) {
+                return null;
+            }
+            nm.params.add(new Param(pt, pm.name, pm.line, pm.col));
+            p = p + 1;
+        }
+        nm.body = this.cloneStmt(tmpl.body, tmpl.typeParams, args, tmpl.typeParamCount);
+        cls.methods.add(nm);
+        this.pendingMethods.add(nm);
+        return nm;
+    }
+
     private MethodDecl resolveMethodOverload(ClassDecl cls, String name, ExprList args,
+                                             Expr callExpr,
                                              boolean wantStatic, boolean mustMatchStatic,
                                              int line, int col) {
         int i = 0;
@@ -763,6 +1289,19 @@ public class Sema {
             this.checkExpr(args.get(i));
             if (this.hadError) return null;
             i = i + 1;
+        }
+        int explicitCount = 0;
+        if (callExpr != null) {
+            explicitCount = callExpr.typeArgCount;
+        }
+        if (explicitCount > 0) {
+            int ti = 0;
+            while (ti < explicitCount) {
+                if (!this.resolveType(callExpr.typeArgs[ti], line, col)) {
+                    return null;
+                }
+                ti = ti + 1;
+            }
         }
         int pass = 0;
         while (pass < 2) {
@@ -772,10 +1311,44 @@ public class Sema {
                 int m = 0;
                 while (m < c.methods.size()) {
                     MethodDecl md = c.methods.get(m);
-                    if (md.name.equals(name) &&
-                        (!mustMatchStatic || md.isStatic == wantStatic) &&
-                        this.argsMatch(md, args, exact)) {
-                        return md;
+                    if (md.name.equals(name) && (!mustMatchStatic || md.isStatic == wantStatic)) {
+                        if (md.isGenericTemplate) {
+                            if (md.params.size() == args.size() &&
+                                (explicitCount == 0 || explicitCount == md.typeParamCount)) {
+                                Type[] gargs = new Type[md.typeParamCount];
+                                boolean ok = true;
+                                if (explicitCount > 0) {
+                                    int g = 0;
+                                    while (g < md.typeParamCount) {
+                                        gargs[g] = callExpr.typeArgs[g];
+                                        g = g + 1;
+                                    }
+                                } else {
+                                    int a = 0;
+                                    while (a < args.size()) {
+                                        this.inferTypeFromPattern(md.params.get(a).type, args.get(a).inferredType,
+                                                                  md.typeParams, gargs, md.typeParamCount);
+                                        a = a + 1;
+                                    }
+                                    int g = 0;
+                                    while (g < md.typeParamCount) {
+                                        if (gargs[g] == null) {
+                                            ok = false;
+                                        }
+                                        g = g + 1;
+                                    }
+                                }
+                                if (ok) {
+                                    MethodDecl instM = this.instantiateMethod(c, md, gargs, md.typeParamCount, line, col);
+                                    if (this.hadError) return null;
+                                    if (instM != null && this.argsMatch(instM, args, exact)) {
+                                        return instM;
+                                    }
+                                }
+                            }
+                        } else if (explicitCount == 0 && this.argsMatch(md, args, exact)) {
+                            return md;
+                        }
                     }
                     m = m + 1;
                 }
@@ -820,6 +1393,50 @@ public class Sema {
         return null;
     }
 
+    private boolean checkTargetWritable(Expr target) {
+        if (target.kind == ExprKind.IDENT()) {
+            if (target.isClassRef) {
+                this.errorAt(target.line, target.col, "cannot assign to class name");
+                return false;
+            }
+            if (this.scope.lookupFinal(target.name)) {
+                this.errorAt(target.line, target.col,
+                    "cannot assign to final variable '".concat(target.name).concat("'"));
+                return false;
+            }
+            return true;
+        }
+        if (target.kind == ExprKind.FIELD()) {
+            if (target.isArrayLength) {
+                this.errorAt(target.line, target.col, "array '.length' is read-only");
+                return false;
+            }
+            if (target.left != null && target.left.inferredType != null &&
+                target.left.inferredType.kind == TypeKind.CLASS()) {
+                ClassDecl cls = target.left.inferredType.resolvedClass;
+                FieldDecl fld = this.findField(cls, target.name);
+                if (fld != null && fld.isFinal) {
+                    if (fld.isStatic) {
+                        this.errorAt(target.line, target.col,
+                            "cannot assign to final static field '".concat(fld.name).concat("'"));
+                        return false;
+                    }
+                    boolean inCtor = this.currentMethod != null &&
+                                     this.currentMethod.isConstructor &&
+                                     target.left.kind == ExprKind.THIS() &&
+                                     cls == this.currentClass;
+                    if (!inCtor) {
+                        this.errorAt(target.line, target.col,
+                            "cannot assign to final field '".concat(fld.name).concat("'"));
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        return true;
+    }
+
     private void checkExpr(Expr e) {
         if (e == null || this.hadError) {
             return;
@@ -829,8 +1446,20 @@ public class Sema {
             e.inferredType = this.tyInt;
             return;
         }
+        if (k == ExprKind.LONG_LIT()) {
+            e.inferredType = this.tyLong;
+            return;
+        }
+        if (k == ExprKind.DOUBLE_LIT()) {
+            e.inferredType = this.tyDouble;
+            return;
+        }
+        if (k == ExprKind.FLOAT_LIT()) {
+            e.inferredType = this.tyFloat;
+            return;
+        }
         if (k == ExprKind.CHAR_LIT()) {
-            e.inferredType = this.tyByte;
+            e.inferredType = this.tyChar;
             return;
         }
         if (k == ExprKind.BOOL_LIT()) {
@@ -889,12 +1518,26 @@ public class Sema {
             this.checkExpr(e.left);
             if (this.hadError) return;
             Type opTy = e.left.inferredType;
-            if (e.op == UnaryOp.NEG() || e.op == UnaryOp.BIT_NOT()) {
+            if (e.op == UnaryOp.NEG()) {
                 if (!this.isNumeric(opTy)) {
-                    this.errorAt(e.line, e.col, "unary operator requires numeric operand");
+                    this.errorAt(e.line, e.col, "unary '-' requires numeric operand");
                     return;
                 }
-                e.inferredType = this.tyInt;
+                if (opTy.kind == TypeKind.BYTE() || opTy.kind == TypeKind.CHAR()) {
+                    e.inferredType = this.tyInt;
+                } else {
+                    e.inferredType = opTy;
+                }
+            } else if (e.op == UnaryOp.BIT_NOT()) {
+                if (!this.isIntegral(opTy)) {
+                    this.errorAt(e.line, e.col, "unary '~' requires integral operand");
+                    return;
+                }
+                if (opTy.kind == TypeKind.BYTE() || opTy.kind == TypeKind.CHAR()) {
+                    e.inferredType = this.tyInt;
+                } else {
+                    e.inferredType = opTy;
+                }
             } else if (e.op == UnaryOp.NOT()) {
                 if (opTy == null || opTy.kind != TypeKind.BOOLEAN()) {
                     this.errorAt(e.line, e.col, "unary '!' requires boolean operand");
@@ -910,9 +1553,7 @@ public class Sema {
                     this.errorAt(e.line, e.col, "increment/decrement requires assignable target");
                     return;
                 }
-                if ((target.kind == ExprKind.IDENT() && target.isClassRef) ||
-                    (target.kind == ExprKind.FIELD() && target.isArrayLength)) {
-                    this.errorAt(e.line, e.col, "cannot modify read-only target");
+                if (!this.checkTargetWritable(target)) {
                     return;
                 }
                 if (!this.isNumeric(opTy)) {
@@ -930,7 +1571,10 @@ public class Sema {
                 return;
             }
             Type src = e.left.inferredType;
-            if (e.elemType.kind == TypeKind.INT() || e.elemType.kind == TypeKind.BYTE()) {
+            if (e.elemType.kind == TypeKind.INT() || e.elemType.kind == TypeKind.BYTE() ||
+                e.elemType.kind == TypeKind.CHAR() ||
+                e.elemType.kind == TypeKind.LONG() || e.elemType.kind == TypeKind.FLOAT() ||
+                e.elemType.kind == TypeKind.DOUBLE()) {
                 if (!this.isNumeric(src)) {
                     this.errorAt(e.line, e.col, "numeric cast requires numeric operand");
                     return;
@@ -983,15 +1627,23 @@ public class Sema {
             this.checkExpr(target);
             this.checkExpr(e.right);
             if (this.hadError) return;
-            if (target.kind == ExprKind.IDENT() && target.isClassRef) {
-                this.errorAt(target.line, target.col, "cannot assign to class name");
+            if (!this.checkTargetWritable(target)) {
                 return;
             }
-            if (target.kind == ExprKind.FIELD() && target.isArrayLength) {
-                this.errorAt(target.line, target.col, "array '.length' is read-only");
+            if (e.op == BinaryOp.ADD() && this.isStringType(target.inferredType)) {
+                if (e.right.inferredType == null || e.right.inferredType.kind == TypeKind.VOID()) {
+                    this.errorAt(e.line, e.col, "cannot concatenate void to String");
+                    return;
+                }
+                e.inferredType = target.inferredType;
                 return;
             }
-            if (!this.isNumeric(target.inferredType) || !this.isNumeric(e.right.inferredType)) {
+            if (e.op == BinaryOp.MOD()) {
+                if (!this.isIntegral(target.inferredType) || !this.isIntegral(e.right.inferredType)) {
+                    this.errorAt(e.line, e.col, "'%=' requires integral operands");
+                    return;
+                }
+            } else if (!this.isNumeric(target.inferredType) || !this.isNumeric(e.right.inferredType)) {
                 this.errorAt(e.line, e.col, "compound assignment requires numeric operands");
                 return;
             }
@@ -1006,15 +1658,28 @@ public class Sema {
             Type rt = e.right.inferredType;
             int op = e.op;
 
-            if (op == BinaryOp.ADD() || op == BinaryOp.SUB() || op == BinaryOp.MUL() ||
-                op == BinaryOp.DIV() || op == BinaryOp.MOD() ||
-                op == BinaryOp.BIT_AND() || op == BinaryOp.BIT_OR() ||
-                op == BinaryOp.BIT_XOR() || op == BinaryOp.SHL() || op == BinaryOp.SHR()) {
-                if (!this.isNumeric(lt) || !this.isNumeric(rt)) {
-                    this.errorAt(e.line, e.col, "arithmetic/bitwise operator requires numeric operands");
+            if (op == BinaryOp.ADD() && (this.isStringType(lt) || this.isStringType(rt))) {
+                if (lt == null || rt == null || lt.kind == TypeKind.VOID() || rt.kind == TypeKind.VOID()) {
+                    this.errorAt(e.line, e.col, "cannot concatenate void with String");
                     return;
                 }
-                e.inferredType = this.tyInt;
+                ClassDecl strCls = this.findClass("String");
+                e.inferredType = Type.makeResolvedClass(strCls);
+            } else if (op == BinaryOp.ADD() || op == BinaryOp.SUB() || op == BinaryOp.MUL() ||
+                       op == BinaryOp.DIV()) {
+                if (!this.isNumeric(lt) || !this.isNumeric(rt)) {
+                    this.errorAt(e.line, e.col, "arithmetic operator requires numeric operands");
+                    return;
+                }
+                e.inferredType = this.promoteNumeric(lt, rt);
+            } else if (op == BinaryOp.MOD() ||
+                       op == BinaryOp.BIT_AND() || op == BinaryOp.BIT_OR() ||
+                       op == BinaryOp.BIT_XOR() || op == BinaryOp.SHL() || op == BinaryOp.SHR()) {
+                if (!this.isIntegral(lt) || !this.isIntegral(rt)) {
+                    this.errorAt(e.line, e.col, "integral/bitwise operator requires integral operands");
+                    return;
+                }
+                e.inferredType = this.promoteNumeric(lt, rt);
             } else if (op == BinaryOp.LT() || op == BinaryOp.LE() ||
                        op == BinaryOp.GT() || op == BinaryOp.GE()) {
                 if (!this.isNumeric(lt) || !this.isNumeric(rt)) {
@@ -1048,14 +1713,12 @@ public class Sema {
         if (k == ExprKind.ASSIGN()) {
             Expr target = e.left;
             this.checkExpr(target);
+            Type prevExp = this.expectedExprType;
+            this.expectedExprType = target.inferredType;
             this.checkExpr(e.right);
+            this.expectedExprType = prevExp;
             if (this.hadError) return;
-            if (target.kind == ExprKind.IDENT() && target.isClassRef) {
-                this.errorAt(target.line, target.col, "cannot assign to class name");
-                return;
-            }
-            if (target.kind == ExprKind.FIELD() && target.isArrayLength) {
-                this.errorAt(target.line, target.col, "array '.length' is read-only");
+            if (!this.checkTargetWritable(target)) {
                 return;
             }
             if (!this.exprAssignable(target.inferredType, e.right)) {
@@ -1127,7 +1790,7 @@ public class Sema {
                 this.errorAt(e.line, e.col, "indexing requires an array");
                 return;
             }
-            if (!this.isNumeric(e.right.inferredType)) {
+            if (!this.isIntegral(e.right.inferredType)) {
                 this.errorAt(e.right.line, e.right.col, "array index must be an integer");
                 return;
             }
@@ -1164,7 +1827,7 @@ public class Sema {
                 }
                 ClassDecl cls = obj.inferredType.resolvedClass;
                 boolean isClassCall = (obj.kind == ExprKind.IDENT() && obj.isClassRef);
-                MethodDecl m = this.resolveMethodOverload(cls, mname, e.args, isClassCall, true, e.line, e.col);
+                MethodDecl m = this.resolveMethodOverload(cls, mname, e.args, e, isClassCall, true, e.line, e.col);
                 if (m == null) {
                     return;
                 }
@@ -1175,7 +1838,7 @@ public class Sema {
             }
             if (callee.kind == ExprKind.IDENT()) {
                 String mname = callee.name;
-                MethodDecl m = this.resolveMethodOverload(this.currentClass, mname, e.args, true, true, e.line, e.col);
+                MethodDecl m = this.resolveMethodOverload(this.currentClass, mname, e.args, e, true, true, e.line, e.col);
                 if (m == null) {
                     return;
                 }
@@ -1200,6 +1863,75 @@ public class Sema {
                 this.errorAt(e.line, e.col, "cannot instantiate abstract class '".concat(e.name).concat("'"));
                 return;
             }
+            if (cls.isGenericTemplate) {
+                Type[] gargs = new Type[cls.typeParamCount];
+                if (e.typeArgCount > 0) {
+                    if (e.typeArgCount != cls.typeParamCount) {
+                        this.errorAt(e.line, e.col, "generic class '".concat(cls.name)
+                            .concat("' expects ").concat(String.fromInt(cls.typeParamCount))
+                            .concat(" type argument(s), got ").concat(String.fromInt(e.typeArgCount)));
+                        return;
+                    }
+                    int ti = 0;
+                    while (ti < e.typeArgCount) {
+                        if (!this.resolveType(e.typeArgs[ti], e.line, e.col)) {
+                            return;
+                        }
+                        gargs[ti] = e.typeArgs[ti];
+                        ti = ti + 1;
+                    }
+                } else {
+                    boolean inferredFromExpected = false;
+                    if (this.expectedExprType != null &&
+                        this.expectedExprType.kind == TypeKind.CLASS() &&
+                        this.expectedExprType.resolvedClass != null &&
+                        this.expectedExprType.resolvedClass.genericArgCount == cls.typeParamCount) {
+                        int g = 0;
+                        while (g < cls.typeParamCount) {
+                            gargs[g] = this.expectedExprType.resolvedClass.genericArgs[g];
+                            g = g + 1;
+                        }
+                        inferredFromExpected = true;
+                    }
+                    if (!inferredFromExpected) {
+                        int ai = 0;
+                        while (ai < e.args.size()) {
+                            this.checkExpr(e.args.get(ai));
+                            if (this.hadError) return;
+                            ai = ai + 1;
+                        }
+                        int ci = 0;
+                        while (ci < cls.constructors.size()) {
+                            MethodDecl ctor = cls.constructors.get(ci);
+                            if (ctor.params.size() == e.args.size()) {
+                                int a = 0;
+                                while (a < e.args.size()) {
+                                    this.inferTypeFromPattern(ctor.params.get(a).type,
+                                                              e.args.get(a).inferredType,
+                                                              cls.typeParams, gargs, cls.typeParamCount);
+                                    a = a + 1;
+                                }
+                                break;
+                            }
+                            ci = ci + 1;
+                        }
+                    }
+                    int g = 0;
+                    while (g < cls.typeParamCount) {
+                        if (gargs[g] == null) {
+                            this.errorAt(e.line, e.col,
+                                "cannot infer type arguments for generic class '".concat(cls.name).concat("'"));
+                            return;
+                        }
+                        g = g + 1;
+                    }
+                }
+                cls = this.instantiateClass(cls, gargs, cls.typeParamCount, e.line, e.col);
+                if (this.hadError) return;
+            } else if (e.typeArgCount > 0 || e.isDiamond) {
+                this.errorAt(e.line, e.col, "class '".concat(cls.name).concat("' is not generic"));
+                return;
+            }
             e.resolvedClass = cls;
             e.resolvedMethod = this.resolveCtorOverload(cls, e.args, e.line, e.col);
             e.inferredType = Type.makeResolvedClass(cls);
@@ -1211,7 +1943,7 @@ public class Sema {
             }
             this.checkExpr(e.left);
             if (this.hadError) return;
-            if (!this.isNumeric(e.left.inferredType)) {
+            if (!this.isIntegral(e.left.inferredType)) {
                 this.errorAt(e.left.line, e.left.col, "array size must be an integer");
                 return;
             }
@@ -1239,8 +1971,15 @@ public class Sema {
             if (!this.resolveType(st.varType, st.line, st.col)) {
                 return;
             }
+            if (st.isFinal && st.expr == null) {
+                this.errorAt(st.line, st.col, "final variable '".concat(st.varName).concat("' must be initialized"));
+                return;
+            }
             if (st.expr != null) {
+                Type prevExp = this.expectedExprType;
+                this.expectedExprType = st.varType;
                 this.checkExpr(st.expr);
+                this.expectedExprType = prevExp;
                 if (this.hadError) return;
                 if (!this.exprAssignable(st.varType, st.expr)) {
                     this.errorAt(st.line, st.col, "cannot initialize '".concat(st.varName)
@@ -1249,7 +1988,7 @@ public class Sema {
                     return;
                 }
             }
-            this.scopeDeclare(st.varName, st.varType, st.line, st.col);
+            this.scopeDeclareFinal(st.varName, st.varType, st.isFinal, st.line, st.col);
             return;
         }
         if (k == StmtKind.IF()) {
@@ -1318,8 +2057,8 @@ public class Sema {
         if (k == StmtKind.SWITCH()) {
             this.checkExpr(st.expr);
             if (this.hadError) return;
-            if (!this.isNumeric(st.expr.inferredType)) {
-                this.errorAt(st.expr.line, st.expr.col, "'switch' expression must be int or byte");
+            if (!this.isIntegral(st.expr.inferredType)) {
+                this.errorAt(st.expr.line, st.expr.col, "'switch' expression must be integral");
                 return;
             }
             this.breakDepth = this.breakDepth + 1;
@@ -1376,13 +2115,62 @@ public class Sema {
                     this.errorAt(st.line, st.col, "non-void method must return a value");
                     return;
                 }
+                Type prevExp = this.expectedExprType;
+                this.expectedExprType = ret;
                 this.checkExpr(st.expr);
+                this.expectedExprType = prevExp;
                 if (this.hadError) return;
                 if (!this.exprAssignable(ret, st.expr)) {
                     this.errorAt(st.line, st.col, "return value type '"
                         .concat(this.typeName(st.expr.inferredType))
                         .concat("' incompatible with '").concat(this.typeName(ret)).concat("'"));
                 }
+            }
+            return;
+        }
+        if (k == StmtKind.THROW()) {
+            this.checkExpr(st.expr);
+            if (this.hadError) return;
+            ClassDecl excCls = this.findClass("Exception");
+            if (excCls == null) {
+                this.errorAt(st.line, st.col, "'Exception' class is required for 'throw'");
+                return;
+            }
+            Type et = st.expr.inferredType;
+            if (et == null || et.kind != TypeKind.CLASS() || et.resolvedClass.isInterface ||
+                !this.isSubtype(et.resolvedClass, excCls)) {
+                this.errorAt(st.line, st.col, "'throw' expression must be an instance of Exception");
+                return;
+            }
+            return;
+        }
+        if (k == StmtKind.TRY()) {
+            ClassDecl excCls = this.findClass("Exception");
+            if (excCls == null) {
+                this.errorAt(st.line, st.col, "'Exception' class is required for 'try'");
+                return;
+            }
+            this.checkStmt(st.thenBranch);
+            if (this.hadError) return;
+            int i = 0;
+            while (i < st.stmts.size() && !this.hadError) {
+                Stmt c = st.stmts.get(i);
+                if (!this.resolveType(c.varType, c.line, c.col)) {
+                    return;
+                }
+                if (c.varType.kind != TypeKind.CLASS() || c.varType.resolvedClass.isInterface ||
+                    !this.isSubtype(c.varType.resolvedClass, excCls)) {
+                    this.errorAt(c.line, c.col, "catch parameter must be Exception or a subclass of Exception");
+                    return;
+                }
+                this.pushScope();
+                this.scope.add(c.varName, c.varType);
+                this.checkStmt(c.thenBranch);
+                this.popScope();
+                i = i + 1;
+            }
+            if (!this.hadError && st.elseBranch != null) {
+                this.checkStmt(st.elseBranch);
             }
             return;
         }
@@ -1427,42 +2215,81 @@ public class Sema {
         return false;
     }
 
+    private void checkClassMembers(ClassDecl cls) {
+        if (cls.isInterface || cls.isGenericTemplate) {
+            return;
+        }
+        int fi = 0;
+        while (fi < cls.fields.size() && !this.hadError) {
+            FieldDecl fld = cls.fields.get(fi);
+            if (fld.initExpr != null) {
+                this.currentClass = cls;
+                this.currentMethod = null;
+                this.pushScope();
+                Type prevExp = this.expectedExprType;
+                this.expectedExprType = fld.type;
+                this.checkExpr(fld.initExpr);
+                this.expectedExprType = prevExp;
+                this.popScope();
+                if (!this.hadError && !this.exprAssignable(fld.type, fld.initExpr)) {
+                    this.errorAt(fld.line, fld.col, "cannot initialize field '".concat(fld.name)
+                        .concat("' with '").concat(this.typeName(fld.initExpr.inferredType)).concat("'"));
+                }
+            }
+            fi = fi + 1;
+        }
+        if (cls.constructors.size() == 0) {
+            if (cls.superClass != null && !this.hasZeroArgCtor(cls.superClass)) {
+                this.errorAt(cls.line, cls.col,
+                    "class '".concat(cls.name)
+                    .concat("' must define a constructor calling 'super(...)'"));
+            }
+        } else {
+            int c = 0;
+            while (c < cls.constructors.size() && !this.hadError) {
+                MethodDecl ctor = cls.constructors.get(c);
+                this.checkMethod(cls, ctor);
+                if (!this.hadError && cls.superClass != null && !ctor.hasSuperCall) {
+                    if (!this.hasZeroArgCtor(cls.superClass)) {
+                        this.errorAt(ctor.line, ctor.col,
+                            "constructor must call 'super(...)' for superclass '"
+                            .concat(cls.superClass.name).concat("'"));
+                    }
+                }
+                c = c + 1;
+            }
+        }
+        int m = 0;
+        while (m < cls.methods.size() && !this.hadError) {
+            MethodDecl md = cls.methods.get(m);
+            if (!md.isGenericTemplate) {
+                this.checkMethod(cls, md);
+            }
+            m = m + 1;
+        }
+    }
+
     public boolean analyze() {
         if (!this.pass1Register()) {
             return false;
         }
         int i = 0;
         while (i < this.prog.classes.size() && !this.hadError) {
-            ClassDecl cls = this.prog.classes.get(i);
-            if (!cls.isInterface) {
-                if (cls.constructors.size() == 0) {
-                    if (cls.superClass != null && !this.hasZeroArgCtor(cls.superClass)) {
-                        this.errorAt(cls.line, cls.col,
-                            "class '".concat(cls.name)
-                            .concat("' must define a constructor calling 'super(...)'"));
-                    }
-                } else {
-                    int c = 0;
-                    while (c < cls.constructors.size() && !this.hadError) {
-                        MethodDecl ctor = cls.constructors.get(c);
-                        this.checkMethod(cls, ctor);
-                        if (!this.hadError && cls.superClass != null && !ctor.hasSuperCall) {
-                            if (!this.hasZeroArgCtor(cls.superClass)) {
-                                this.errorAt(ctor.line, ctor.col,
-                                    "constructor must call 'super(...)' for superclass '"
-                                    .concat(cls.superClass.name).concat("'"));
-                            }
-                        }
-                        c = c + 1;
-                    }
-                }
-                int m = 0;
-                while (m < cls.methods.size() && !this.hadError) {
-                    this.checkMethod(cls, cls.methods.get(m));
-                    m = m + 1;
-                }
-            }
+            this.checkClassMembers(this.prog.classes.get(i));
             i = i + 1;
+        }
+        int pc = 0;
+        int pm = 0;
+        while ((pc < this.pendingClasses.size() || pm < this.pendingMethods.size()) && !this.hadError) {
+            while (pc < this.pendingClasses.size() && !this.hadError) {
+                this.checkClassMembers(this.pendingClasses.get(pc));
+                pc = pc + 1;
+            }
+            while (pm < this.pendingMethods.size() && !this.hadError) {
+                MethodDecl md = this.pendingMethods.get(pm);
+                this.checkMethod(md.owner, md);
+                pm = pm + 1;
+            }
         }
         return !this.hadError;
     }

@@ -55,6 +55,27 @@ public class String {
         return new String(out);
     }
 
+    public String append(String other) {
+        if (other == null) {
+            return this;
+        }
+        int lenA = this.data.length;
+        int lenB = other.length();
+        byte[] out = new byte[lenA + lenB];
+        int i = 0;
+        while (i < lenA) {
+            out[i] = this.data[i];
+            i = i + 1;
+        }
+        int j = 0;
+        while (j < lenB) {
+            out[lenA + j] = other.byteAt(j);
+            j = j + 1;
+        }
+        this.data = out;
+        return this;
+    }
+
     public String substring(int start, int end) {
         int len = end - start;
         if (len < 0) {
@@ -103,5 +124,114 @@ public class String {
             i = i - 1;
         }
         return new String(out);
+    }
+
+    public static String fromBoolean(boolean b) {
+        if (b) {
+            return "true";
+        }
+        return "false";
+    }
+
+    public static String fromByte(byte b) {
+        return String.fromInt(b);
+    }
+
+    private static native byte[] rt_long_to_bytes(long n);
+    private static native byte[] rt_double_to_bytes(double d);
+    private static native byte[] rt_float_to_bytes(float f);
+    private static native byte[] rt_char_to_bytes(char c);
+    private static native boolean rt_is_valid_double(byte[] data);
+    private static native double rt_parse_double_val(byte[] data);
+    private static native boolean rt_is_valid_float(byte[] data);
+    private static native float rt_parse_float_val(byte[] data);
+
+    public char charAt(int i) {
+        return (char) this.data[i];
+    }
+
+    public static String fromLong(long n) {
+        return new String(String.rt_long_to_bytes(n));
+    }
+
+    public static String fromDouble(double d) {
+        return new String(String.rt_double_to_bytes(d));
+    }
+
+    public static String fromFloat(float f) {
+        return new String(String.rt_float_to_bytes(f));
+    }
+
+    public static String fromChar(char c) {
+        return new String(String.rt_char_to_bytes(c));
+    }
+
+    public long toLong() {
+        int len = this.data.length;
+        if (len == 0) {
+            throw new Exception("invalid long format: empty string");
+        }
+        int i = 0;
+        boolean neg = false;
+        byte first = this.data[0];
+        if (first == '-') {
+            neg = true;
+            i = 1;
+        } else if (first == '+') {
+            i = 1;
+        }
+        if (i >= len) {
+            throw new Exception("invalid long format: " + this);
+        }
+        long acc = 0L;
+        while (i < len) {
+            byte c = this.data[i];
+            if (c < '0' || c > '9') {
+                throw new Exception("invalid long format: " + this);
+            }
+            int digit = c - '0';
+            if (acc > 922337203685477580L) {
+                throw new Exception("long overflow: " + this);
+            }
+            if (acc == 922337203685477580L) {
+                if ((neg && digit > 8) || (!neg && digit > 7)) {
+                    throw new Exception("long overflow: " + this);
+                }
+            }
+            if (neg && acc == 922337203685477580L && digit == 8) {
+                if (i + 1 < len) {
+                    throw new Exception("long overflow: " + this);
+                }
+                return -9223372036854775807L - 1L;
+            }
+            acc = acc * 10L + digit;
+            i = i + 1;
+        }
+        if (neg) {
+            return -acc;
+        }
+        return acc;
+    }
+
+    public int toInt() {
+        long val = this.toLong();
+        if (val < -2147483648L || val > 2147483647L) {
+            throw new Exception("integer overflow: " + this);
+        }
+        return (int) val;
+    }
+
+    public double toDouble() {
+        if (!String.rt_is_valid_double(this.data)) {
+            throw new Exception("invalid double format: " + this);
+        }
+        return String.rt_parse_double_val(this.data);
+    }
+
+    public float toFloat() {
+        if (!String.rt_is_valid_float(this.data)) {
+            throw new Exception("invalid float format: " + this);
+        }
+        return String.rt_parse_float_val(this.data);
     }
 }

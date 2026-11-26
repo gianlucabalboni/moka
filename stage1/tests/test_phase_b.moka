@@ -1,0 +1,91 @@
+class Box {
+    public int x;
+    public Box(int x) {
+        this.x = x;
+    }
+}
+
+class Main {
+    public static int main() {
+        // 1. Mutable String.append
+        String mut = "Hello";
+        mut.append(" ").append("Moka");
+        if (!mut.equals("Hello Moka")) {
+            Console.eprintln("String.append failed: " + mut);
+            return 1;
+        }
+
+        // 2. String + and += with primitives and objects
+        String s = "int=" + 42 + ", bool=" + true + ", char=" + 'A';
+        if (!s.equals("int=42, bool=true, char=A")) {
+            Console.eprintln("String + primitives failed: " + s);
+            return 1;
+        }
+        char first = mut.charAt(0);
+        if (first != 'H' || !String.fromChar(first).equals("H")) {
+            Console.eprintln("charAt/fromChar failed");
+            return 1;
+        }
+        s += ", null=" + null;
+        if (!s.equals("int=42, bool=true, char=A, null=null")) {
+            Console.eprintln("String += null failed: " + s);
+            return 1;
+        }
+        Box b = new Box(7);
+        String objStr = "box=" + b;
+        if (!objStr.equals("box=<object>")) {
+            Console.eprintln("String + object failed: " + objStr);
+            return 1;
+        }
+
+        // 3. long type & widening
+        long big = 10000000000L;
+        int small = 500;
+        long sumLong = big + small;
+        if (sumLong != 10000000500L) {
+            Console.eprintln("long arithmetic failed: " + sumLong);
+            return 1;
+        }
+        int narrowed = (int) (sumLong - 10000000000L);
+        if (narrowed != 500) {
+            Console.eprintln("long cast failed");
+            return 1;
+        }
+
+        // 4. float & double types & promotions
+        float f = 2.5f;
+        double d = 3.25;
+        double mixed = f + d + 1;
+        if (mixed < 6.74 || mixed > 6.76) {
+            Console.eprintln("float/double promotion failed: " + mixed);
+            return 1;
+        }
+        int trunc = (int) d;
+        if (trunc != 3) {
+            Console.eprintln("double->int cast failed");
+            return 1;
+        }
+
+        // 5. String.fromLong / fromDouble / fromFloat / fromBoolean
+        if (!String.fromLong(-123456789012L).equals("-123456789012")) {
+            Console.eprintln("String.fromLong failed");
+            return 1;
+        }
+        if (!String.fromDouble(1.5).equals("1.5")) {
+            Console.eprintln("String.fromDouble failed");
+            return 1;
+        }
+        if (!String.fromFloat(2.5f).equals("2.5")) {
+            Console.eprintln("String.fromFloat failed");
+            return 1;
+        }
+        if (!String.fromBoolean(false).equals("false")) {
+            Console.eprintln("String.fromBoolean failed");
+            return 1;
+        }
+
+        Console.println(mut + " | " + sumLong + " | " + mixed);
+        Console.println("All Stage 1 Phase B tests passed!");
+        return 0;
+    }
+}

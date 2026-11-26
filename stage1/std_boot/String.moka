@@ -1,0 +1,139 @@
+public class String {
+    private byte[] data;
+
+    public String(byte[] data) {
+        this.data = data;
+    }
+
+    public int length() {
+        return this.data.length;
+    }
+
+    public byte byteAt(int i) {
+        return this.data[i];
+    }
+
+    public byte[] bytes() {
+        return this.data;
+    }
+
+    public boolean equals(String other) {
+        if (other == null) {
+            return false;
+        }
+        int len = this.data.length;
+        if (len != other.length()) {
+            return false;
+        }
+        int i = 0;
+        while (i < len) {
+            if (this.data[i] != other.byteAt(i)) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    public String concat(String other) {
+        if (other == null) {
+            return this;
+        }
+        int lenA = this.data.length;
+        int lenB = other.length();
+        byte[] out = new byte[lenA + lenB];
+        int i = 0;
+        while (i < lenA) {
+            out[i] = this.data[i];
+            i = i + 1;
+        }
+        int j = 0;
+        while (j < lenB) {
+            out[lenA + j] = other.byteAt(j);
+            j = j + 1;
+        }
+        return new String(out);
+    }
+
+    public String append(String other) {
+        if (other == null) {
+            return this;
+        }
+        int lenA = this.data.length;
+        int lenB = other.length();
+        byte[] out = new byte[lenA + lenB];
+        int i = 0;
+        while (i < lenA) {
+            out[i] = this.data[i];
+            i = i + 1;
+        }
+        int j = 0;
+        while (j < lenB) {
+            out[lenA + j] = other.byteAt(j);
+            j = j + 1;
+        }
+        this.data = out;
+        return this;
+    }
+
+    public String substring(int start, int end) {
+        int len = end - start;
+        if (len < 0) {
+            len = 0;
+        }
+        byte[] out = new byte[len];
+        int i = 0;
+        while (i < len) {
+            out[i] = this.data[start + i];
+            i = i + 1;
+        }
+        return new String(out);
+    }
+
+    public static String fromInt(int n) {
+        if (n == 0) {
+            return "0";
+        }
+        boolean neg = false;
+        if (n < 0) {
+            neg = true;
+            n = -n;
+        }
+        byte[] tmp = new byte[12];
+        int count = 0;
+        while (n > 0) {
+            int digit = n % 10;
+            tmp[count] = '0' + digit;
+            count = count + 1;
+            n = n / 10;
+        }
+        int total = count;
+        if (neg) {
+            total = total + 1;
+        }
+        byte[] out = new byte[total];
+        int idx = 0;
+        if (neg) {
+            out[0] = '-';
+            idx = 1;
+        }
+        int i = count - 1;
+        while (i >= 0) {
+            out[idx] = tmp[i];
+            idx = idx + 1;
+            i = i - 1;
+        }
+        return new String(out);
+    }
+
+    public static String fromBoolean(boolean b) {
+        if (b) {
+            return "true";
+        }
+        return "false";
+    }
+
+    public static String fromByte(byte b) {
+        return String.fromInt(b);
+    }
+}

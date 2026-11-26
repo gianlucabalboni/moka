@@ -1,6 +1,9 @@
 #ifndef MOKA_RUNTIME_H
 #define MOKA_RUNTIME_H
 
+#include <errno.h>
+#include <limits.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -50,9 +53,17 @@ typedef struct RtShadowFrame {
     void** slots;
 } RtShadowFrame;
 
+typedef struct RtExceptionFrame {
+    jmp_buf env;
+    struct RtExceptionFrame* prev;
+    RtShadowFrame* saved_shadow_stack;
+    void* exception;
+} RtExceptionFrame;
+
 /* Global GC & runtime state */
 static Obj* rt_all_objects = NULL;
 static RtShadowFrame* rt_shadow_stack = NULL;
+static RtExceptionFrame* rt_exc_top = NULL;
 static size_t rt_num_objects = 0;
 static size_t rt_gc_threshold = 1024;
 static size_t rt_total_collections = 0;
@@ -136,6 +147,11 @@ static inline void rt_gc_mark_roots(void) {
             Obj* obj = NULL;
             memcpy(&obj, rt_static_roots[i], sizeof(Obj*));
             rt_gc_mark_obj(obj);
+        }
+    }
+    for (RtExceptionFrame* ef = rt_exc_top; ef != NULL; ef = ef->prev) {
+        if (ef->exception != NULL) {
+            rt_gc_mark_obj((Obj*)ef->exception);
         }
     }
 }
@@ -519,6 +535,158 @@ static inline bool rt_remove_file(RtArray* path_bytes) {
     int rc = remove(path);
     free(path);
     return rc == 0;
+}
+
+static inline RtArray* rt_long_to_bytes(int64_t v) {
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "%lld", (long long)v);
+    if (n < 0) n = 0;
+    return rt_byte_array_from_literal(buf, (int32_t)n);
+}
+
+static inline RtArray* rt_double_to_bytes(double v) {
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "%.15g", v);
+    if (n < 0) n = 0;
+    return rt_byte_array_from_literal(buf, (int32_t)n);
+}
+
+static inline RtArray* rt_float_to_bytes(float v) {
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "%.7g", (double)v);
+    if (n < 0) n = 0;
+    return rt_byte_array_from_literal(buf, (int32_t)n);
+}
+
+static inline RtArray* rt_char_to_bytes(uint16_t c) {
+    uint8_t b = (uint8_t)(c & 0xFFu);
+    return rt_byte_array_from_literal((const char*)&b, 1);
+}
+
+static inline void rt_throw(void* exc) {
+    if (!exc) {
+        fprintf(stderr, "moka runtime error: cannot throw null exception\n");
+        exit(1);
+    }
+    if (!rt_exc_top) {
+        Obj* obj = (Obj*)exc;
+        const char* tname = (obj->type_info && obj->type_info->name) ? obj->type_info->name : "Exception";
+        fprintf(stderr, "moka uncaught exception: %s\n", tname);
+        exit(1);
+    }
+    rt_exc_top->exception = exc;
+    rt_shadow_stack = rt_exc_top->saved_shadow_stack;
+    longjmp(rt_exc_top->env, 1);
+}
+
+static inline int32_t rt_parse_int(RtArray* bytes, bool* ok) {
+    *ok = false;
+    if (!bytes || bytes->length == 0) {
+        return 0;
+    }
+    char* s = rt_bytes_to_cstr(bytes);
+    if (s[0] == '\0' || s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
+        free(s);
+        return 0;
+    }
+    errno = 0;
+    char* end = NULL;
+    long val = strtol(s, &end, 10);
+    if (errno == ERANGE || end == s || *end != '\0' || val < INT32_MIN || val > INT32_MAX) {
+        free(s);
+        return 0;
+    }
+    free(s);
+    *ok = true;
+    return (int32_t)val;
+}
+
+static inline int64_t rt_parse_long(RtArray* bytes, bool* ok) {
+    *ok = false;
+    if (!bytes || bytes->length == 0) {
+        return 0;
+    }
+    char* s = rt_bytes_to_cstr(bytes);
+    if (s[0] == '\0' || s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
+        free(s);
+        return 0;
+    }
+    errno = 0;
+    char* end = NULL;
+    long long val = strtoll(s, &end, 10);
+    if (errno == ERANGE || end == s || *end != '\0') {
+        free(s);
+        return 0;
+    }
+    free(s);
+    *ok = true;
+    return (int64_t)val;
+}
+
+static inline double rt_parse_double(RtArray* bytes, bool* ok) {
+    *ok = false;
+    if (!bytes || bytes->length == 0) {
+        return 0.0;
+    }
+    char* s = rt_bytes_to_cstr(bytes);
+    if (s[0] == '\0' || s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
+        free(s);
+        return 0.0;
+    }
+    errno = 0;
+    char* end = NULL;
+    double val = strtod(s, &end);
+    if (errno == ERANGE || end == s || *end != '\0') {
+        free(s);
+        return 0.0;
+    }
+    free(s);
+    *ok = true;
+    return val;
+}
+
+static inline bool rt_is_valid_double(RtArray* bytes) {
+    bool ok = false;
+    (void)rt_parse_double(bytes, &ok);
+    return ok;
+}
+
+static inline double rt_parse_double_val(RtArray* bytes) {
+    bool ok = false;
+    return rt_parse_double(bytes, &ok);
+}
+
+static inline float rt_parse_float(RtArray* bytes, bool* ok) {
+    *ok = false;
+    if (!bytes || bytes->length == 0) {
+        return 0.0f;
+    }
+    char* s = rt_bytes_to_cstr(bytes);
+    if (s[0] == '\0' || s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
+        free(s);
+        return 0.0f;
+    }
+    errno = 0;
+    char* end = NULL;
+    float val = strtof(s, &end);
+    if (errno == ERANGE || end == s || *end != '\0') {
+        free(s);
+        return 0.0f;
+    }
+    free(s);
+    *ok = true;
+    return val;
+}
+
+static inline bool rt_is_valid_float(RtArray* bytes) {
+    bool ok = false;
+    (void)rt_parse_float(bytes, &ok);
+    return ok;
+}
+
+static inline float rt_parse_float_val(RtArray* bytes) {
+    bool ok = false;
+    return rt_parse_float(bytes, &ok);
 }
 
 #endif /* MOKA_RUNTIME_H */

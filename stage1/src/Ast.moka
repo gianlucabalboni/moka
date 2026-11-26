@@ -6,6 +6,10 @@ public class TypeKind {
     public static int CLASS()   { return 4; }
     public static int ARRAY()   { return 5; }
     public static int NULL()    { return 6; }
+    public static int LONG()    { return 7; }
+    public static int DOUBLE()  { return 8; }
+    public static int FLOAT()   { return 9; }
+    public static int CHAR()    { return 10; }
 }
 
 public class Type {
@@ -13,9 +17,29 @@ public class Type {
     public String className;
     public ClassDecl resolvedClass;
     public Type elem;
+    public Type[] typeArgs;
+    public int typeArgCount;
 
     public Type(int kind) {
         this.kind = kind;
+        this.typeArgCount = 0;
+    }
+
+    public void addTypeArg(Type t) {
+        if (this.typeArgs == null) {
+            this.typeArgs = new Type[4];
+        }
+        if (this.typeArgCount >= this.typeArgs.length) {
+            Type[] next = new Type[this.typeArgs.length * 2];
+            int i = 0;
+            while (i < this.typeArgCount) {
+                next[i] = this.typeArgs[i];
+                i = i + 1;
+            }
+            this.typeArgs = next;
+        }
+        this.typeArgs[this.typeArgCount] = t;
+        this.typeArgCount = this.typeArgCount + 1;
     }
 
     public static Type makeClass(String name) {
@@ -58,6 +82,9 @@ public class ExprKind {
     public static int COMPOUND_ASSIGN() { return 16; }
     public static int SUPER()           { return 17; }
     public static int INSTANCEOF()      { return 18; }
+    public static int LONG_LIT()        { return 19; }
+    public static int DOUBLE_LIT()      { return 20; }
+    public static int FLOAT_LIT()       { return 21; }
 }
 
 public class UnaryOp {
@@ -119,11 +146,33 @@ public class Expr {
     public MethodDecl resolvedMethod;
     public ClassDecl resolvedClass;
     public Type elemType;
+    public Type[] typeArgs;
+    public int typeArgCount;
+    public boolean isDiamond;
 
     public Expr(int kind, int line, int col) {
         this.kind = kind;
         this.line = line;
         this.col = col;
+        this.typeArgCount = 0;
+        this.isDiamond = false;
+    }
+
+    public void addTypeArg(Type t) {
+        if (this.typeArgs == null) {
+            this.typeArgs = new Type[4];
+        }
+        if (this.typeArgCount >= this.typeArgs.length) {
+            Type[] next = new Type[this.typeArgs.length * 2];
+            int i = 0;
+            while (i < this.typeArgCount) {
+                next[i] = this.typeArgs[i];
+                i = i + 1;
+            }
+            this.typeArgs = next;
+        }
+        this.typeArgs[this.typeArgCount] = t;
+        this.typeArgCount = this.typeArgCount + 1;
     }
 }
 
@@ -172,6 +221,9 @@ public class StmtKind {
     public static int SWITCH()   { return 9; }
     public static int CASE()     { return 10; }
     public static int DEFAULT()  { return 11; }
+    public static int TRY()      { return 12; }
+    public static int CATCH()    { return 13; }
+    public static int THROW()    { return 14; }
 }
 
 public class Stmt {
@@ -188,6 +240,7 @@ public class Stmt {
     public Stmt initStmt;
     public Expr stepExpr;
     public int intVal;
+    public boolean isFinal;
 
     public Stmt(int kind, int line, int col) {
         this.kind = kind;
@@ -278,6 +331,8 @@ public class FieldDecl {
     public Type type;
     public String name;
     public boolean isStatic;
+    public boolean isFinal;
+    public Expr initExpr;
     public int line;
     public int col;
 
@@ -329,6 +384,12 @@ public class MethodDecl {
     public boolean isStatic;
     public boolean isNative;
     public boolean isAbstract;
+    public boolean isFinal;
+    public String[] typeParams;
+    public int typeParamCount;
+    public boolean isGenericTemplate;
+    public Type[] genericArgs;
+    public int genericArgCount;
     public ParamList params;
     public Stmt body;
     public ClassDecl owner;
@@ -347,11 +408,32 @@ public class MethodDecl {
         this.isStatic = isStatic;
         this.isNative = isNative;
         this.isAbstract = false;
+        this.isFinal = false;
+        this.typeParamCount = 0;
+        this.isGenericTemplate = false;
+        this.genericArgCount = 0;
         this.params = new ParamList();
         this.vtableIndex = -1;
         this.hasSuperCall = false;
         this.line = line;
         this.col = col;
+    }
+
+    public void addTypeParam(String p) {
+        if (this.typeParams == null) {
+            this.typeParams = new String[4];
+        }
+        if (this.typeParamCount >= this.typeParams.length) {
+            String[] next = new String[this.typeParams.length * 2];
+            int i = 0;
+            while (i < this.typeParamCount) {
+                next[i] = this.typeParams[i];
+                i = i + 1;
+            }
+            this.typeParams = next;
+        }
+        this.typeParams[this.typeParamCount] = p;
+        this.typeParamCount = this.typeParamCount + 1;
     }
 }
 
@@ -395,9 +477,17 @@ public class ClassDecl {
     public String name;
     public boolean isInterface;
     public boolean isAbstract;
+    public boolean isFinal;
+    public String[] typeParams;
+    public int typeParamCount;
+    public boolean isGenericTemplate;
+    public Type[] genericArgs;
+    public int genericArgCount;
     public String superName;
+    public Type superType;
     public ClassDecl superClass;
     public String[] implNames;
+    public Type[] implTypes;
     public int implCount;
     public ClassList impls;
     public FieldList fields;
@@ -411,7 +501,12 @@ public class ClassDecl {
         this.name = name;
         this.isInterface = false;
         this.isAbstract = false;
+        this.isFinal = false;
+        this.typeParamCount = 0;
+        this.isGenericTemplate = false;
+        this.genericArgCount = 0;
         this.implNames = new String[8];
+        this.implTypes = new Type[8];
         this.implCount = 0;
         this.impls = new ClassList();
         this.fields = new FieldList();
@@ -422,17 +517,42 @@ public class ClassDecl {
         this.col = col;
     }
 
+    public void addTypeParam(String p) {
+        if (this.typeParams == null) {
+            this.typeParams = new String[4];
+        }
+        if (this.typeParamCount >= this.typeParams.length) {
+            String[] next = new String[this.typeParams.length * 2];
+            int i = 0;
+            while (i < this.typeParamCount) {
+                next[i] = this.typeParams[i];
+                i = i + 1;
+            }
+            this.typeParams = next;
+        }
+        this.typeParams[this.typeParamCount] = p;
+        this.typeParamCount = this.typeParamCount + 1;
+    }
+
     public void addImplName(String name) {
+        this.addImplSpec(name, null);
+    }
+
+    public void addImplSpec(String name, Type ty) {
         if (this.implCount >= this.implNames.length) {
             String[] next = new String[this.implNames.length * 2];
+            Type[] nextT = new Type[this.implTypes.length * 2];
             int i = 0;
             while (i < this.implCount) {
                 next[i] = this.implNames[i];
+                nextT[i] = this.implTypes[i];
                 i = i + 1;
             }
             this.implNames = next;
+            this.implTypes = nextT;
         }
         this.implNames[this.implCount] = name;
+        this.implTypes[this.implCount] = ty;
         this.implCount = this.implCount + 1;
     }
 }

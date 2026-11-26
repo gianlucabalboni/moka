@@ -14,6 +14,12 @@ public class Codegen {
     private int[] breakSlotStart;
     private int breakDepth;
 
+    /* Exception frame tracking per method */
+    private int excCounter;
+    private int excDepth;
+    private String[] excFrameNames;
+    private Stmt[] excFinallyBlocks;
+
     public Codegen(Program prog) {
         this.prog = prog;
         this.out = new ByteBuffer(8192);
@@ -26,6 +32,10 @@ public class Codegen {
         this.loopDepth = 0;
         this.breakSlotStart = new int[64];
         this.breakDepth = 0;
+        this.excCounter = 0;
+        this.excDepth = 0;
+        this.excFrameNames = new String[64];
+        this.excFinallyBlocks = new Stmt[64];
     }
 
     private boolean isRefType(Type ty) {
@@ -75,7 +85,34 @@ public class Codegen {
             }
             return total;
         }
+        if (k == StmtKind.TRY()) {
+            int total = this.countRefVars(st.thenBranch) + this.countRefVars(st.elseBranch);
+            int i = 0;
+            while (i < st.stmts.size()) {
+                Stmt c = st.stmts.get(i);
+                total = total + 1 + this.countRefVars(c.thenBranch);
+                i = i + 1;
+            }
+            return total;
+        }
         return 0;
+    }
+
+    private void emitExcUnwind() {
+        int i = this.excDepth - 1;
+        while (i >= 0) {
+            this.emitIndent();
+            this.out.appendString("rt_exc_top = ");
+            this.out.appendString(this.excFrameNames[i]);
+            this.out.appendString(".prev;\n");
+            if (this.excFinallyBlocks[i] != null) {
+                int savedDepth = this.excDepth;
+                this.excDepth = i;
+                this.emitStmt(this.excFinallyBlocks[i]);
+                this.excDepth = savedDepth;
+            }
+            i = i - 1;
+        }
     }
 
     private void emitClearSlots(int fromSlot, int toSlot) {
@@ -111,6 +148,10 @@ public class Codegen {
         if (k == TypeKind.VOID())    { this.out.appendString("void"); return; }
         if (k == TypeKind.INT())     { this.out.appendString("int32_t"); return; }
         if (k == TypeKind.BYTE())    { this.out.appendString("uint8_t"); return; }
+        if (k == TypeKind.CHAR())    { this.out.appendString("uint16_t"); return; }
+        if (k == TypeKind.LONG())    { this.out.appendString("int64_t"); return; }
+        if (k == TypeKind.FLOAT())   { this.out.appendString("float"); return; }
+        if (k == TypeKind.DOUBLE())  { this.out.appendString("double"); return; }
         if (k == TypeKind.BOOLEAN()) { this.out.appendString("bool"); return; }
         if (k == TypeKind.ARRAY())   { this.out.appendString("RtArray*"); return; }
         if (k == TypeKind.NULL())    { this.out.appendString("void*"); return; }
@@ -129,8 +170,14 @@ public class Codegen {
 
     private void emitZeroValue(Type ty) {
         int k = ty.kind;
-        if (k == TypeKind.INT() || k == TypeKind.BYTE()) {
+        if (k == TypeKind.INT() || k == TypeKind.BYTE() || k == TypeKind.CHAR()) {
             this.out.appendString("0");
+        } else if (k == TypeKind.LONG()) {
+            this.out.appendString("0LL");
+        } else if (k == TypeKind.FLOAT()) {
+            this.out.appendString("0.0f");
+        } else if (k == TypeKind.DOUBLE()) {
+            this.out.appendString("0.0");
         } else if (k == TypeKind.BOOLEAN()) {
             this.out.appendString("false");
         } else if (this.isInterfaceType(ty)) {
@@ -246,14 +293,113 @@ public class Codegen {
         return d;
     }
 
+    private boolean isStringType(Type ty) {
+        return ty != null && ty.kind == TypeKind.CLASS() &&
+               ty.resolvedClass != null && ty.resolvedClass.name.equals("String");
+    }
+
+    private boolean hasClass(String name) {
+        int i = 0;
+        while (i < this.prog.classes.size()) {
+            if (this.prog.classes.get(i).name.equals(name)) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    private void emitToStringExpr(Expr e) {
+        Type ty = e.inferredType;
+        if (this.isStringType(ty)) {
+            this.out.appendString("rt_str_not_null(");
+            this.emitExpr(e);
+            this.out.appendByte(')');
+            return;
+        }
+        if (ty == null || ty.kind == TypeKind.NULL()) {
+            this.out.appendString("String_new(rt_byte_array_from_literal(\"null\", 4))");
+            return;
+        }
+        if (ty.kind == TypeKind.INT()) {
+            this.out.appendString("String_fromInt((int32_t)(");
+            this.emitExpr(e);
+            this.out.appendString("))");
+            return;
+        }
+        if (ty.kind == TypeKind.BYTE()) {
+            this.out.appendString("String_fromByte((uint8_t)(");
+            this.emitExpr(e);
+            this.out.appendString("))");
+            return;
+        }
+        if (ty.kind == TypeKind.CHAR()) {
+            this.out.appendString("String_fromChar((uint16_t)(");
+            this.emitExpr(e);
+            this.out.appendString("))");
+            return;
+        }
+        if (ty.kind == TypeKind.BOOLEAN()) {
+            this.out.appendString("String_fromBoolean(");
+            this.emitExpr(e);
+            this.out.appendByte(')');
+            return;
+        }
+        if (ty.kind == TypeKind.LONG()) {
+            this.out.appendString("String_fromLong((int64_t)(");
+            this.emitExpr(e);
+            this.out.appendString("))");
+            return;
+        }
+        if (ty.kind == TypeKind.DOUBLE()) {
+            this.out.appendString("String_fromDouble((double)(");
+            this.emitExpr(e);
+            this.out.appendString("))");
+            return;
+        }
+        if (ty.kind == TypeKind.FLOAT()) {
+            this.out.appendString("String_fromFloat((float)(");
+            this.emitExpr(e);
+            this.out.appendString("))");
+            return;
+        }
+        if (this.isInterfaceType(ty)) {
+            this.out.appendString("rt_obj_to_str((");
+            this.emitExpr(e);
+            this.out.appendString(").obj)");
+            return;
+        }
+        this.out.appendString("rt_obj_to_str((void*)(");
+        this.emitExpr(e);
+        this.out.appendString("))");
+    }
+
     private void emitExpr(Expr e) {
         int k = e.kind;
         if (k == ExprKind.INT_LIT()) {
             this.out.appendInt(e.intVal);
             return;
         }
+        if (k == ExprKind.LONG_LIT()) {
+            this.out.appendString("((int64_t)");
+            this.out.appendString(e.name);
+            this.out.appendString("LL)");
+            return;
+        }
+        if (k == ExprKind.DOUBLE_LIT()) {
+            this.out.appendString("((double)");
+            this.out.appendString(e.name);
+            this.out.appendByte(')');
+            return;
+        }
+        if (k == ExprKind.FLOAT_LIT()) {
+            this.out.appendString("((float)");
+            this.out.appendString(e.name);
+            this.out.appendByte(')');
+            return;
+        }
         if (k == ExprKind.CHAR_LIT()) {
-            this.out.appendString("((uint8_t)");
+            this.out.appendString("((uint16_t)");
             this.out.appendInt(e.charVal);
             this.out.appendByte(')');
             return;
@@ -371,6 +517,16 @@ public class Codegen {
             return;
         }
         if (k == ExprKind.COMPOUND_ASSIGN()) {
+            if (e.op == BinaryOp.ADD() && this.isStringType(e.left.inferredType)) {
+                this.out.appendByte('(');
+                this.emitExpr(e.left);
+                this.out.appendString(" = String_concat(rt_str_not_null(");
+                this.emitExpr(e.left);
+                this.out.appendString("), ");
+                this.emitToStringExpr(e.right);
+                this.out.appendString("))");
+                return;
+            }
             this.out.appendByte('(');
             this.emitExpr(e.left);
             this.out.appendByte(' ');
@@ -381,6 +537,15 @@ public class Codegen {
             return;
         }
         if (k == ExprKind.BINARY()) {
+            if (e.op == BinaryOp.ADD() &&
+                (this.isStringType(e.left.inferredType) || this.isStringType(e.right.inferredType))) {
+                this.out.appendString("String_concat(");
+                this.emitToStringExpr(e.left);
+                this.out.appendString(", ");
+                this.emitToStringExpr(e.right);
+                this.out.appendByte(')');
+                return;
+            }
             this.out.appendByte('(');
             boolean hasIface = this.isInterfaceType(e.left.inferredType) ||
                                this.isInterfaceType(e.right.inferredType);
@@ -796,6 +961,7 @@ public class Codegen {
         }
         if (k == StmtKind.RETURN()) {
             if (this.currentMethod != null && this.currentMethod.isConstructor) {
+                this.emitExcUnwind();
                 if (this.gcTotalSlots > 0) {
                     this.emitIndent();
                     this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
@@ -803,14 +969,17 @@ public class Codegen {
                 this.emitIndent();
                 this.out.appendString("return;\n");
             } else if (st.expr != null) {
-                if (this.gcTotalSlots > 0) {
+                if (this.gcTotalSlots > 0 || this.excDepth > 0) {
                     this.emitIndent();
                     this.emitCType(this.currentMethod.returnType);
                     this.out.appendString(" _gc_ret = ");
                     this.emitExprAs(st.expr, this.currentMethod.returnType);
                     this.out.appendString(";\n");
-                    this.emitIndent();
-                    this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
+                    this.emitExcUnwind();
+                    if (this.gcTotalSlots > 0) {
+                        this.emitIndent();
+                        this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
+                    }
                     this.emitIndent();
                     this.out.appendString("return _gc_ret;\n");
                 } else {
@@ -820,6 +989,7 @@ public class Codegen {
                     this.out.appendString(";\n");
                 }
             } else {
+                this.emitExcUnwind();
                 if (this.gcTotalSlots > 0) {
                     this.emitIndent();
                     this.out.appendString("rt_shadow_stack = _gc_frame.prev;\n");
@@ -827,6 +997,205 @@ public class Codegen {
                 this.emitIndent();
                 this.out.appendString("return;\n");
             }
+            return;
+        }
+        if (k == StmtKind.THROW()) {
+            this.emitIndent();
+            this.out.appendString("rt_throw((void*)(");
+            this.emitExpr(st.expr);
+            this.out.appendString("));\n");
+            return;
+        }
+        if (k == StmtKind.TRY()) {
+            int id = this.excCounter;
+            this.excCounter = this.excCounter + 1;
+            boolean hasFin = st.elseBranch != null;
+            boolean hasCatch = st.stmts.size() > 0;
+            String finName = "_fin_ef_".concat(String.fromInt(id));
+            String efName = "_ef_".concat(String.fromInt(id));
+
+            this.emitIndent();
+            this.out.appendString("{\n");
+            this.indent = this.indent + 1;
+
+            if (hasFin) {
+                this.emitIndent();
+                this.out.appendString("void* _fin_exc_");
+                this.out.appendInt(id);
+                this.out.appendString(" = NULL;\n");
+                this.emitIndent();
+                this.out.appendString("bool _fin_rethrow_");
+                this.out.appendInt(id);
+                this.out.appendString(" = false;\n");
+                this.emitIndent();
+                this.out.appendString("RtExceptionFrame ");
+                this.out.appendString(finName);
+                this.out.appendString(" = { .prev = rt_exc_top, .saved_shadow_stack = rt_shadow_stack, .exception = NULL };\n");
+                this.emitIndent();
+                this.out.appendString("rt_exc_top = &");
+                this.out.appendString(finName);
+                this.out.appendString(";\n");
+                this.emitIndent();
+                this.out.appendString("if (setjmp(");
+                this.out.appendString(finName);
+                this.out.appendString(".env) == 0) {\n");
+                this.indent = this.indent + 1;
+
+                this.excFrameNames[this.excDepth] = finName;
+                this.excFinallyBlocks[this.excDepth] = st.elseBranch;
+                this.excDepth = this.excDepth + 1;
+            }
+
+            if (hasCatch) {
+                this.emitIndent();
+                this.out.appendString("RtExceptionFrame ");
+                this.out.appendString(efName);
+                this.out.appendString(" = { .prev = rt_exc_top, .saved_shadow_stack = rt_shadow_stack, .exception = NULL };\n");
+                this.emitIndent();
+                this.out.appendString("rt_exc_top = &");
+                this.out.appendString(efName);
+                this.out.appendString(";\n");
+                this.emitIndent();
+                this.out.appendString("if (setjmp(");
+                this.out.appendString(efName);
+                this.out.appendString(".env) == 0) {\n");
+                this.indent = this.indent + 1;
+
+                this.excFrameNames[this.excDepth] = efName;
+                this.excFinallyBlocks[this.excDepth] = null;
+                this.excDepth = this.excDepth + 1;
+
+                this.emitStmt(st.thenBranch);
+
+                this.excDepth = this.excDepth - 1;
+                this.emitIndent();
+                this.out.appendString("rt_exc_top = ");
+                this.out.appendString(efName);
+                this.out.appendString(".prev;\n");
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("} else {\n");
+                this.indent = this.indent + 1;
+                this.emitIndent();
+                this.out.appendString("rt_exc_top = ");
+                this.out.appendString(efName);
+                this.out.appendString(".prev;\n");
+                this.emitIndent();
+                this.out.appendString("void* _caught_");
+                this.out.appendInt(id);
+                this.out.appendString(" = ");
+                this.out.appendString(efName);
+                this.out.appendString(".exception;\n");
+
+                int ci = 0;
+                while (ci < st.stmts.size()) {
+                    Stmt c = st.stmts.get(ci);
+                    this.emitIndent();
+                    if (ci > 0) {
+                        this.out.appendString("else ");
+                    }
+                    this.out.appendString("if (rt_is_instance(_caught_");
+                    this.out.appendInt(id);
+                    this.out.appendString(", &");
+                    this.out.appendString(c.varType.resolvedClass.name);
+                    this.out.appendString("_type_info)) {\n");
+                    this.indent = this.indent + 1;
+
+                    int catchSlot = this.gcNextSlot;
+                    if (this.gcTotalSlots > 0) {
+                        this.gcNextSlot = this.gcNextSlot + 1;
+                    }
+                    this.emitIndent();
+                    this.emitCType(c.varType);
+                    this.out.appendByte(' ');
+                    this.out.appendString(c.varName);
+                    this.out.appendString(" = (");
+                    this.emitCType(c.varType);
+                    this.out.appendString(")_caught_");
+                    this.out.appendInt(id);
+                    this.out.appendString(";\n");
+                    if (this.gcTotalSlots > 0) {
+                        this.emitIndent();
+                        this.out.appendString("_gc_slots[");
+                        this.out.appendInt(catchSlot);
+                        this.out.appendString("] = (void*)&");
+                        this.out.appendString(c.varName);
+                        this.out.appendString(";\n");
+                    }
+                    this.emitStmt(c.thenBranch);
+                    if (this.gcTotalSlots > 0) {
+                        this.emitClearSlots(catchSlot, this.gcNextSlot);
+                    }
+                    this.indent = this.indent - 1;
+                    this.emitIndent();
+                    this.out.appendString("}\n");
+                    ci = ci + 1;
+                }
+                this.emitIndent();
+                this.out.appendString("else {\n");
+                this.indent = this.indent + 1;
+                this.emitIndent();
+                this.out.appendString("rt_throw(_caught_");
+                this.out.appendInt(id);
+                this.out.appendString(");\n");
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("}\n");
+
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("}\n");
+            } else {
+                this.emitStmt(st.thenBranch);
+            }
+
+            if (hasFin) {
+                this.excDepth = this.excDepth - 1;
+                this.emitIndent();
+                this.out.appendString("rt_exc_top = ");
+                this.out.appendString(finName);
+                this.out.appendString(".prev;\n");
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("} else {\n");
+                this.indent = this.indent + 1;
+                this.emitIndent();
+                this.out.appendString("rt_exc_top = ");
+                this.out.appendString(finName);
+                this.out.appendString(".prev;\n");
+                this.emitIndent();
+                this.out.appendString("_fin_exc_");
+                this.out.appendInt(id);
+                this.out.appendString(" = ");
+                this.out.appendString(finName);
+                this.out.appendString(".exception;\n");
+                this.emitIndent();
+                this.out.appendString("_fin_rethrow_");
+                this.out.appendInt(id);
+                this.out.appendString(" = true;\n");
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("}\n");
+
+                this.emitStmt(st.elseBranch);
+
+                this.emitIndent();
+                this.out.appendString("if (_fin_rethrow_");
+                this.out.appendInt(id);
+                this.out.appendString(") {\n");
+                this.indent = this.indent + 1;
+                this.emitIndent();
+                this.out.appendString("rt_throw(_fin_exc_");
+                this.out.appendInt(id);
+                this.out.appendString(");\n");
+                this.indent = this.indent - 1;
+                this.emitIndent();
+                this.out.appendString("}\n");
+            }
+
+            this.indent = this.indent - 1;
+            this.emitIndent();
+            this.out.appendString("}\n");
             return;
         }
         if (k == StmtKind.EXPR()) {
@@ -940,7 +1309,7 @@ public class Codegen {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (cls.isInterface) {
+            if (cls.isInterface && !cls.isGenericTemplate) {
                 this.out.appendString("typedef struct ");
                 this.out.appendString(cls.name);
                 this.out.appendString("_VTable {\n");
@@ -1046,7 +1415,7 @@ public class Codegen {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (!cls.isInterface && cls.vtable.size() > 0) {
+            if (!cls.isInterface && !cls.isGenericTemplate && cls.vtable.size() > 0) {
                 this.out.appendString("typedef struct ");
                 this.out.appendString(cls.name);
                 this.out.appendString("_VTable {\n");
@@ -1082,7 +1451,7 @@ public class Codegen {
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
             int v = 0;
-            while (!cls.isInterface && v < cls.vtable.size()) {
+            while (!cls.isInterface && !cls.isGenericTemplate && v < cls.vtable.size()) {
                 MethodDecl md = cls.vtable.get(v);
                 String slot = this.vtableSlotName(md);
                 this.out.appendString("static inline ");
@@ -1206,7 +1575,7 @@ public class Codegen {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl c0 = this.prog.classes.get(i);
-            if (!c0.isInterface) {
+            if (!c0.isInterface && !c0.isGenericTemplate) {
                 int d = this.classDepth(c0);
                 if (d > maxDepth) {
                     maxDepth = d;
@@ -1219,7 +1588,7 @@ public class Codegen {
             i = 0;
             while (i < this.prog.classes.size()) {
                 ClassDecl cls = this.prog.classes.get(i);
-                if (cls.isInterface || this.classDepth(cls) != depth) {
+                if (cls.isInterface || cls.isGenericTemplate || this.classDepth(cls) != depth) {
                     i = i + 1;
                     continue;
                 }
@@ -1495,6 +1864,18 @@ public class Codegen {
             this.out.appendString(cls.superClass.name);
             this.out.appendString("*)this);\n");
         }
+        int fi = 0;
+        while (fi < cls.fields.size()) {
+            FieldDecl fld = cls.fields.get(fi);
+            if (!fld.isStatic && fld.initExpr != null) {
+                this.out.appendString("    this->");
+                this.out.appendString(fld.name);
+                this.out.appendString(" = ");
+                this.emitExprAs(fld.initExpr, fld.type);
+                this.out.appendString(";\n");
+            }
+            fi = fi + 1;
+        }
         if (ctor != null && ctor.body != null) {
             this.currentMethod = ctor;
             this.indent = 1;
@@ -1556,7 +1937,7 @@ public class Codegen {
         int i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (!cls.isInterface) {
+            if (!cls.isInterface && !cls.isGenericTemplate) {
                 this.out.appendString("typedef struct ");
                 this.out.appendString(cls.name);
                 this.out.appendByte(' ');
@@ -1575,7 +1956,7 @@ public class Codegen {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl c0 = this.prog.classes.get(i);
-            if (!c0.isInterface) {
+            if (!c0.isInterface && !c0.isGenericTemplate) {
                 int d = this.classDepth(c0);
                 if (d > maxDepth) {
                     maxDepth = d;
@@ -1588,7 +1969,7 @@ public class Codegen {
             i = 0;
             while (i < this.prog.classes.size()) {
                 ClassDecl cls = this.prog.classes.get(i);
-                if (!cls.isInterface && this.classDepth(cls) == depth) {
+                if (!cls.isInterface && !cls.isGenericTemplate && this.classDepth(cls) == depth) {
                     this.out.appendString("struct ");
                     this.out.appendString(cls.name);
                     this.out.appendString(" {\n");
@@ -1625,7 +2006,7 @@ public class Codegen {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (!cls.isInterface) {
+            if (!cls.isInterface && !cls.isGenericTemplate) {
                 int f = 0;
                 while (f < cls.fields.size()) {
                     FieldDecl fld = cls.fields.get(f);
@@ -1651,7 +2032,7 @@ public class Codegen {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (!cls.isInterface) {
+            if (!cls.isInterface && !cls.isGenericTemplate) {
                 if (cls.constructors.size() == 0) {
                     this.emitInitSig(cls, null);
                     this.out.appendString(";\n");
@@ -1675,7 +2056,7 @@ public class Codegen {
                 int m = 0;
                 while (m < cls.methods.size()) {
                     MethodDecl md = cls.methods.get(m);
-                    if (!md.isNative && !md.isAbstract) {
+                    if (!md.isNative && !md.isAbstract && !md.isGenericTemplate) {
                         this.emitMethodSig(cls, md);
                         this.out.appendString(";\n");
                     }
@@ -1686,6 +2067,17 @@ public class Codegen {
         }
         this.out.appendByte('\n');
 
+        if (this.hasClass("String")) {
+            this.out.appendString("static inline String* rt_str_not_null(String* s) {\n");
+            this.out.appendString("    if (s) return s;\n");
+            this.out.appendString("    return String_new(rt_byte_array_from_literal(\"null\", 4));\n");
+            this.out.appendString("}\n");
+            this.out.appendString("static inline String* rt_obj_to_str(void* p) {\n");
+            this.out.appendString("    if (p) return String_new(rt_byte_array_from_literal(\"<object>\", 8));\n");
+            this.out.appendString("    return String_new(rt_byte_array_from_literal(\"null\", 4));\n");
+            this.out.appendString("}\n\n");
+        }
+
         /* 3b. VTable instances, GC Type Descriptors & Virtual Dispatchers */
         this.emitTypeInfos();
         this.emitVirtualDispatchers();
@@ -1694,7 +2086,7 @@ public class Codegen {
         i = 0;
         while (i < this.prog.classes.size()) {
             ClassDecl cls = this.prog.classes.get(i);
-            if (cls.isInterface) {
+            if (cls.isInterface || cls.isGenericTemplate) {
                 i = i + 1;
                 continue;
             }
@@ -1712,10 +2104,11 @@ public class Codegen {
             int m = 0;
             while (m < cls.methods.size()) {
                 MethodDecl md = cls.methods.get(m);
-                if (!md.isNative && !md.isAbstract) {
+                if (!md.isNative && !md.isAbstract && !md.isGenericTemplate) {
                     this.emitMethodSig(cls, md);
                     this.out.appendString(" {\n");
                     this.currentMethod = md;
+                    this.excDepth = 0;
                     this.indent = 1;
                     if (!md.isStatic) {
                         this.out.appendString("    (void)this;\n");
@@ -1735,8 +2128,13 @@ public class Codegen {
                             s = s + 1;
                         }
                     }
-                    if (md.returnType.kind == TypeKind.VOID() && this.gcTotalSlots > 0) {
+                    if (this.gcTotalSlots > 0) {
                         this.out.appendString("    rt_shadow_stack = _gc_frame.prev;\n");
+                    }
+                    if (md.returnType.kind != TypeKind.VOID()) {
+                        this.out.appendString("    return ");
+                        this.emitZeroValue(md.returnType);
+                        this.out.appendString(";\n");
                     }
                     this.indent = 0;
                     this.currentMethod = null;
@@ -1755,7 +2153,7 @@ public class Codegen {
             i = 0;
             while (i < this.prog.classes.size()) {
                 ClassDecl cls = this.prog.classes.get(i);
-                if (!cls.isInterface) {
+                if (!cls.isInterface && !cls.isGenericTemplate) {
                     int f = 0;
                     while (f < cls.fields.size()) {
                         FieldDecl fld = cls.fields.get(f);
@@ -1768,6 +2166,15 @@ public class Codegen {
                                 this.out.appendString(".obj");
                             }
                             this.out.appendString(");\n");
+                        }
+                        if (fld.isStatic && fld.initExpr != null) {
+                            this.out.appendString("    ");
+                            this.out.appendString(cls.name);
+                            this.out.appendString("__s_");
+                            this.out.appendString(fld.name);
+                            this.out.appendString(" = ");
+                            this.emitExprAs(fld.initExpr, fld.type);
+                            this.out.appendString(";\n");
                         }
                         f = f + 1;
                     }
