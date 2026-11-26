@@ -30,7 +30,7 @@ Per ogni metodo/costruttore con `this`, parametri riferimento o variabili locali
 2. **Variabili locali**: ogni `VAR_DECL` riferimento associa `&var` allo slot `_gc_slots[k]`.
 3. **Uscita dai blocchi / cicli**: gli slot usciti dallo scope vengono azzerati (`NULL`) per evitare puntatori pendenti.
 4. **Ritorno**: il valore viene salvato in `_gc_ret`, i frame di eccezione/monitor vengono srotolati (`emitExcUnwind()`), e `rt_shadow_stack = _gc_frame.prev;` ripristina il frame chiamante.
-5. **Safepoint**: `rt_gc_maybe_collect()` viene emesso in testa ai cicli `while`/`for` (mai dentro espressioni C annidate dove potrebbero esserci temporanei non radicati nei registri).
+5. **Safepoint**: `rt_gc_maybe_collect()` viene emesso in testa ai cicli `while`/`for` (mai dentro espressioni C annidate come `foo(a(), b())`, dove un oggetto appena allocato può trovarsi temporaneamente in un registro della CPU senza essere ancora stato registrato nello Shadow Stack).
 
 ---
 
