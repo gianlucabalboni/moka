@@ -1,6 +1,6 @@
 public class Main {
     private static void printUsage() {
-        Console.eprintln("Usage: mokac <file1.moka> [file2.moka ...] [-o <output>] [-r|--run] [--emit-c] [--keep-c] [--no-stdlib] [--std-dir <dir>] [--runtime <header>] [--runtime-dir <dir>]");
+        Console.eprintln("Usage: mokac <file1.moka> [file2.moka ...] [-o <output>] [-r|--run] [--emit-c] [--keep-c] [--no-stdlib] [--cc <compiler>] [--std-dir <dir>] [--runtime <header>] [--runtime-dir <dir>]");
     }
 
     private static boolean endsWith(String s, String suffix) {
@@ -22,6 +22,13 @@ public class Main {
         if (Main.fileExists("stage1/std/String.moka")) {
             return "stage1/std/";
         }
+        String ed = Io.exeDir();
+        if (ed.length() > 0) {
+            String cand = ed.concat("/std/");
+            if (Main.fileExists(cand.concat("String.moka"))) {
+                return cand;
+            }
+        }
         return "";
     }
 
@@ -32,6 +39,13 @@ public class Main {
         if (Main.fileExists("stage1/runtime/runtime.h")) {
             return "stage1/runtime";
         }
+        String ed = Io.exeDir();
+        if (ed.length() > 0) {
+            String cand = ed.concat("/runtime");
+            if (Main.fileExists(cand.concat("/runtime.h"))) {
+                return cand;
+            }
+        }
         return "runtime";
     }
 
@@ -39,7 +53,8 @@ public class Main {
         int lastSlash = -1;
         int i = 0;
         while (i < path.length()) {
-            if (path.byteAt(i) == '/') {
+            byte b = path.byteAt(i);
+            if (b == '/' || b == '\\') {
                 lastSlash = i;
             }
             i = i + 1;
@@ -105,12 +120,14 @@ public class Main {
         String runtimeHeader = "runtime.h";
         String runtimeDir = "";
         String stdDir = "";
+        String cCompiler = "";
         boolean emitC = false;
         boolean keepC = false;
         boolean noStdlib = false;
         boolean runAfter = false;
         boolean explicitOut = false;
         boolean hasStringMoka = false;
+        boolean isWin = Io.isWindows();
 
         int i = 1;
         while (i < argc) {
@@ -141,9 +158,18 @@ public class Main {
                 }
                 i = i + 1;
                 stdDir = Io.argv(i);
-                if (stdDir.length() > 0 && stdDir.byteAt(stdDir.length() - 1) != '/') {
+                if (stdDir.length() > 0 &&
+                    stdDir.byteAt(stdDir.length() - 1) != '/' &&
+                    stdDir.byteAt(stdDir.length() - 1) != '\\') {
                     stdDir = stdDir.concat("/");
                 }
+            } else if (arg.equals("--cc")) {
+                if (i + 1 >= argc) {
+                    Console.eprintln("mokac error: missing compiler after '--cc'");
+                    return 1;
+                }
+                i = i + 1;
+                cCompiler = Io.argv(i);
             } else if (arg.equals("--runtime")) {
                 if (i + 1 >= argc) {
                     Console.eprintln("mokac error: missing header path after '--runtime'");
@@ -184,9 +210,17 @@ public class Main {
             if (emitC) {
                 outPath = "out.c";
             } else if (runAfter) {
-                outPath = "/tmp/moka_run_tmp";
+                if (isWin) {
+                    outPath = ".moka_run_tmp.exe";
+                } else {
+                    outPath = "/tmp/moka_run_tmp";
+                }
             } else {
-                outPath = "a.out";
+                if (isWin) {
+                    outPath = "a.exe";
+                } else {
+                    outPath = "a.out";
+                }
             }
         }
         if (Main.endsWith(outPath, ".c")) {
@@ -325,7 +359,15 @@ public class Main {
             return 1;
         }
 
-        String cmd = "cc -std=c11 -O2 -Wall -Wextra -Werror -pthread -I"
+        if (cCompiler.equals("")) {
+            if (isWin) {
+                cCompiler = "gcc";
+            } else {
+                cCompiler = "cc";
+            }
+        }
+        String cmd = cCompiler
+            .concat(" -std=c11 -O2 -Wall -Wextra -Werror -pthread -I")
             .concat(runtimeDir)
             .concat(" ")
             .concat(cPath)
@@ -343,17 +385,19 @@ public class Main {
         }
         if (runAfter) {
             String runCmd = outPath;
-            boolean hasSlash = false;
-            int si = 0;
-            while (si < outPath.length()) {
-                if (outPath.byteAt(si) == '/') {
-                    hasSlash = true;
-                    break;
+            if (!isWin) {
+                boolean hasSlash = false;
+                int si = 0;
+                while (si < outPath.length()) {
+                    if (outPath.byteAt(si) == '/') {
+                        hasSlash = true;
+                        break;
+                    }
+                    si = si + 1;
                 }
-                si = si + 1;
-            }
-            if (!hasSlash) {
-                runCmd = "./".concat(outPath);
+                if (!hasSlash) {
+                    runCmd = "./".concat(outPath);
+                }
             }
             int runRc = Io.exec(runCmd);
             if (!explicitOut) {

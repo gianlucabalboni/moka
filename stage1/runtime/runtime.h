@@ -17,6 +17,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 /* =========================================================================
  * Mark-and-Sweep Garbage Collector with Shadow Stack
@@ -1169,5 +1175,35 @@ static inline double rt_math_floor(double x) { return floor(x); }
 static inline double rt_math_ceil(double x) { return ceil(x); }
 static inline double rt_math_round(double x) { return round(x); }
 static inline double rt_math_fabs(double x) { return fabs(x); }
+
+static inline bool rt_is_windows(void) {
+#ifdef _WIN32
+    return true;
+#else
+    return false;
+#endif
+}
+
+static inline RtArray* rt_exe_dir(void) {
+#ifdef _WIN32
+    char buf[4096];
+    DWORD len = GetModuleFileNameA(NULL, buf, (DWORD)sizeof(buf));
+    if (len == 0 || len >= (DWORD)sizeof(buf)) {
+        return rt_byte_array_from_literal("", 0);
+    }
+    int32_t last = -1;
+    for (DWORD i = 0; i < len; i++) {
+        if (buf[i] == '\\' || buf[i] == '/') {
+            last = (int32_t)i;
+        }
+    }
+    if (last <= 0) {
+        return rt_byte_array_from_literal("", 0);
+    }
+    return rt_byte_array_from_literal(buf, last);
+#else
+    return rt_byte_array_from_literal("", 0);
+#endif
+}
 
 #endif /* MOKA_RUNTIME_H */

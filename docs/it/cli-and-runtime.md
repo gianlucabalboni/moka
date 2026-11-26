@@ -15,6 +15,7 @@ Usage: mokac <file1.moka> [file2.moka ...] [-o <output>] [-r|--run] [--emit-c] [
 | `--emit-c` | Genera solo il sorgente C11 senza invocare `cc` |
 | `--keep-c` | Mantiene il file `.c` intermedio dopo la compilazione |
 | `--no-stdlib` | Non carica automaticamente `std/*.moka` |
+| `--cc <compiler>` | Specifica il compilatore C11 (`cc` su POSIX, `gcc` su Windows di default) |
 | `--std-dir <dir>` | Specifica la directory della libreria standard |
 | `--runtime-dir <dir>` | Specifica la directory contenente `runtime.h` |
 
@@ -26,6 +27,9 @@ make -C stage1 install
 
 # Rimuove completamente Moka dal sistema
 make -C stage1 uninstall
+
+# Cross-compilazione pacchetto Windows (richiede x86_64-w64-mingw32-gcc)
+make -C stage1 windows
 ```
 
 ---

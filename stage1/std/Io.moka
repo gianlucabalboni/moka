@@ -6,6 +6,8 @@ public class Io {
     private static native boolean rt_remove_file(byte[] path);
     private static native int rt_system(byte[] cmd);
     private static native void rt_exit(int code);
+    private static native boolean rt_is_windows();
+    private static native byte[] rt_exe_dir();
 
     public static int argc() {
         return Io.rt_argc();
@@ -56,5 +58,13 @@ public class Io {
 
     public static void exit(int code) {
         Io.rt_exit(code);
+    }
+
+    public static boolean isWindows() {
+        return Io.rt_is_windows();
+    }
+
+    public static String exeDir() {
+        return new String(Io.rt_exe_dir());
     }
 }

@@ -15,6 +15,7 @@ Usage: mokac <file1.moka> [file2.moka ...] [-o <output>] [-r|--run] [--emit-c] [
 | `--emit-c` | Emit C11 source only without invoking `cc` |
 | `--keep-c` | Keep the intermediate `.c` file after building the executable |
 | `--no-stdlib` | Do not auto-load `std/*.moka` |
+| `--cc <compiler>` | Specify C11 compiler (`cc` on POSIX, `gcc` on Windows by default) |
 | `--std-dir <dir>` | Specify the standard library directory |
 | `--runtime-dir <dir>` | Specify the directory containing `runtime.h` |
 
@@ -26,6 +27,9 @@ make -C stage1 install
 
 # Remove globally
 make -C stage1 uninstall
+
+# Cross-compile Windows bundle (requires x86_64-w64-mingw32-gcc)
+make -C stage1 windows
 ```
 
 ---

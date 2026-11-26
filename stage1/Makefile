@@ -6,7 +6,7 @@ STD_FILES = std/String.moka std/Console.moka std/ByteBuffer.moka std/Io.moka std
 BOOT_STD_FILES = std_boot/String.moka std_boot/Console.moka std_boot/ByteBuffer.moka std_boot/Io.moka std_boot/Exception.moka
 SRC_FILES = src/Token.moka src/Lexer.moka src/Ast.moka src/Parser.moka src/Sema.moka src/Codegen.moka src/Main.moka
 
-.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-phase-b test-phase-c test-final test-phase-d test-phase-e test-phase-f test-bootstrap install uninstall clean
+.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-phase-b test-phase-c test-final test-phase-d test-phase-e test-phase-f test-bootstrap install uninstall windows clean
 
 all: mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-phase-b test-phase-c test-final test-phase-d test-phase-e test-phase-f test-bootstrap
 
@@ -115,6 +115,16 @@ install: build/mokac
 uninstall:
 	rm -rf "$(PREFIX)/bin/mokac" "$(MOKA_SHARE)"
 	@echo "Uninstalled mokac from $(PREFIX)/bin/mokac and $(MOKA_SHARE)"
+
+MINGW_CC ?= x86_64-w64-mingw32-gcc
+
+windows: build/mokac
+	@mkdir -p build/windows
+	$(MINGW_CC) -std=c11 -O2 -Wall -Wextra -Werror -pthread -I$(RUNTIME_DIR) build/stage1.c -o build/windows/mokac.exe -lm
+	rm -rf build/windows/std build/windows/runtime
+	cp -r std build/windows/std
+	cp -r runtime build/windows/runtime
+	@echo "Built Windows distribution in stage1/build/windows/ (mokac.exe + std/ + runtime/)"
 
 clean:
 	rm -rf build
