@@ -1,0 +1,783 @@
+import std/Comparator;
+import std/datastructures/Collection;
+import std/datastructures/Iterator;
+import std/datastructures/Map;
+import std/datastructures/MapEntry;
+import std/datastructures/Set;
+
+/**
+ * Node in an AVL-balanced binary search tree.
+ * (Top-level class because Moka does not support nested classes.)
+ */
+public class TreeNode<K, V> {
+    public K key;
+    public V value;
+    public TreeNode<K, V> left;
+    public TreeNode<K, V> right;
+    public TreeNode<K, V> parent;
+    public int height;
+
+    public TreeNode(K key, V value, TreeNode<K, V> parent) {
+        this.key = key;
+        this.value = value;
+        this.left = null;
+        this.right = null;
+        this.parent = parent;
+        this.height = 1;
+    }
+}
+
+/**
+ * AVL-balanced tree implementation of Map<K, V> ordered by Comparator<K>.
+ *
+ * - Null policy: depends on Comparator<K> (NaturalOrder/StringComparator reject null).
+ * - Thread safety: NOT thread-safe.
+ * - GC: removed/cleared nodes zero out key, value, left, right, and parent.
+ * - Fail-fast: in-order iterators throw ConcurrentModificationException.
+ * - Navigable methods (firstKey, lastKey, floorKey, ceilingKey, lowerKey, higherKey)
+ *   throw NoSuchElementException if no matching key exists (safe for primitive K).
+ */
+public class TreeMap<K, V> implements Map<K, V> {
+    private TreeNode<K, V> root;
+    private int count;
+    private int modCount;
+    private Comparator<K> cmp;
+
+    /**
+     * Constructs an empty TreeMap ordered by cmp.
+     * Throws NullPointerException if cmp is null.
+     * Complexity: O(1).
+     */
+    public TreeMap(Comparator<K> cmp) {
+        if (cmp == null) {
+            throw new NullPointerException("TreeMap: comparator is null");
+        }
+        this.root = null;
+        this.count = 0;
+        this.modCount = 0;
+        this.cmp = cmp;
+    }
+
+    private int nodeHeight(TreeNode<K, V> n) {
+        if (n == null) return 0;
+        return n.height;
+    }
+
+    private void updateHeight(TreeNode<K, V> n) {
+        int lh = this.nodeHeight(n.left);
+        int rh = this.nodeHeight(n.right);
+        if (lh > rh) {
+            n.height = lh + 1;
+        } else {
+            n.height = rh + 1;
+        }
+    }
+
+    private int balanceFactor(TreeNode<K, V> n) {
+        if (n == null) return 0;
+        return this.nodeHeight(n.left) - this.nodeHeight(n.right);
+    }
+
+    private void replaceChild(TreeNode<K, V> parent, TreeNode<K, V> oldChild, TreeNode<K, V> newChild) {
+        if (parent == null) {
+            this.root = newChild;
+        } else if (parent.left == oldChild) {
+            parent.left = newChild;
+        } else {
+            parent.right = newChild;
+        }
+        if (newChild != null) {
+            newChild.parent = parent;
+        }
+    }
+
+    private TreeNode<K, V> rotateRight(TreeNode<K, V> y) {
+        TreeNode<K, V> x = y.left;
+        TreeNode<K, V> t2 = x.right;
+        TreeNode<K, V> p = y.parent;
+
+        x.right = y;
+        y.parent = x;
+        y.left = t2;
+        if (t2 != null) {
+            t2.parent = y;
+        }
+        this.replaceChild(p, y, x);
+
+        this.updateHeight(y);
+        this.updateHeight(x);
+        return x;
+    }
+
+    private TreeNode<K, V> rotateLeft(TreeNode<K, V> x) {
+        TreeNode<K, V> y = x.right;
+        TreeNode<K, V> t2 = y.left;
+        TreeNode<K, V> p = x.parent;
+
+        y.left = x;
+        x.parent = y;
+        x.right = t2;
+        if (t2 != null) {
+            t2.parent = x;
+        }
+        this.replaceChild(p, x, y);
+
+        this.updateHeight(x);
+        this.updateHeight(y);
+        return y;
+    }
+
+    private void rebalanceUp(TreeNode<K, V> node) {
+        TreeNode<K, V> cur = node;
+        while (cur != null) {
+            this.updateHeight(cur);
+            int bf = this.balanceFactor(cur);
+            if (bf > 1) {
+                if (this.balanceFactor(cur.left) < 0) {
+                    this.rotateLeft(cur.left);
+                }
+                cur = this.rotateRight(cur);
+            } else if (bf < -1) {
+                if (this.balanceFactor(cur.right) > 0) {
+                    this.rotateRight(cur.right);
+                }
+                cur = this.rotateLeft(cur);
+            }
+            cur = cur.parent;
+        }
+    }
+
+    private TreeNode<K, V> findNode(K key) {
+        TreeNode<K, V> cur = this.root;
+        while (cur != null) {
+            int c = this.cmp.compare(key, cur.key);
+            if (c < 0) {
+                cur = cur.left;
+            } else if (c > 0) {
+                cur = cur.right;
+            } else {
+                return cur;
+            }
+        }
+        return null;
+    }
+
+    /** Internal helpers for iterators. */
+    public int getModCount() { return this.modCount; }
+
+    public TreeNode<K, V> firstNode() {
+        TreeNode<K, V> p = this.root;
+        if (p != null) {
+            while (p.left != null) {
+                p = p.left;
+            }
+        }
+        return p;
+    }
+
+    public TreeNode<K, V> lastNode() {
+        TreeNode<K, V> p = this.root;
+        if (p != null) {
+            while (p.right != null) {
+                p = p.right;
+            }
+        }
+        return p;
+    }
+
+    public TreeNode<K, V> successor(TreeNode<K, V> t) {
+        if (t == null) return null;
+        if (t.right != null) {
+            TreeNode<K, V> p = t.right;
+            while (p.left != null) {
+                p = p.left;
+            }
+            return p;
+        }
+        TreeNode<K, V> p = t.parent;
+        TreeNode<K, V> ch = t;
+        while (p != null && ch == p.right) {
+            ch = p;
+            p = p.parent;
+        }
+        return p;
+    }
+
+    /** Deletes node p and rebalances AVL tree. Complexity: O(log n). */
+    public void deleteNode(TreeNode<K, V> p) {
+        this.modCount = this.modCount + 1;
+        this.count = this.count - 1;
+
+        if (p.left != null && p.right != null) {
+            TreeNode<K, V> s = this.successor(p);
+            p.key = s.key;
+            p.value = s.value;
+            p = s;
+        }
+
+        TreeNode<K, V> replacement = p.left;
+        if (replacement == null) {
+            replacement = p.right;
+        }
+
+        TreeNode<K, V> parent = p.parent;
+        if (replacement != null) {
+            this.replaceChild(parent, p, replacement);
+            p.key = default(K);
+            p.value = default(V);
+            p.left = null;
+            p.right = null;
+            p.parent = null;
+            this.rebalanceUp(parent);
+        } else if (parent == null) {
+            p.key = default(K);
+            p.value = default(V);
+            this.root = null;
+        } else {
+            this.replaceChild(parent, p, null);
+            p.key = default(K);
+            p.value = default(V);
+            p.left = null;
+            p.right = null;
+            p.parent = null;
+            this.rebalanceUp(parent);
+        }
+    }
+
+    /** Complexity: O(1). */
+    public int size() {
+        return this.count;
+    }
+
+    /** Complexity: O(1). */
+    public boolean isEmpty() {
+        return this.count == 0;
+    }
+
+    /** Complexity: O(log n). */
+    public boolean containsKey(K key) {
+        return this.findNode(key) != null;
+    }
+
+    /** Complexity: O(n). */
+    public boolean containsValue(V value) {
+        TreeNode<K, V> cur = this.firstNode();
+        while (cur != null) {
+            if (cur.value == value) {
+                return true;
+            }
+            cur = this.successor(cur);
+        }
+        return false;
+    }
+
+    /**
+     * Returns the value mapped to key.
+     * Throws NoSuchElementException if key is absent.
+     * Complexity: O(log n).
+     */
+    public V get(K key) {
+        TreeNode<K, V> n = this.findNode(key);
+        if (n == null) {
+            throw new NoSuchElementException("Key not found in TreeMap: " + key);
+        }
+        return n.value;
+    }
+
+    /**
+     * Returns the value mapped to key, or defaultValue if absent.
+     * Complexity: O(log n).
+     */
+    public V getOrDefault(K key, V defaultValue) {
+        TreeNode<K, V> n = this.findNode(key);
+        if (n == null) {
+            return defaultValue;
+        }
+        return n.value;
+    }
+
+    /**
+     * Associates value with key. Returns previous value or default(V) if newly inserted.
+     * Complexity: O(log n).
+     */
+    public V put(K key, V value) {
+        if (this.root == null) {
+            this.root = new TreeNode<K, V>(key, value, null);
+            this.count = 1;
+            this.modCount = this.modCount + 1;
+            return default(V);
+        }
+        TreeNode<K, V> cur = this.root;
+        TreeNode<K, V> parent = null;
+        int c = 0;
+        while (cur != null) {
+            parent = cur;
+            c = this.cmp.compare(key, cur.key);
+            if (c < 0) {
+                cur = cur.left;
+            } else if (c > 0) {
+                cur = cur.right;
+            } else {
+                V old = cur.value;
+                cur.value = value;
+                return old;
+            }
+        }
+        TreeNode<K, V> inserted = new TreeNode<K, V>(key, value, parent);
+        if (c < 0) {
+            parent.left = inserted;
+        } else {
+            parent.right = inserted;
+        }
+        this.count = this.count + 1;
+        this.modCount = this.modCount + 1;
+        this.rebalanceUp(parent);
+        return default(V);
+    }
+
+    /**
+     * Removes the mapping for key and returns its previous value.
+     * Throws NoSuchElementException if key is absent.
+     * Complexity: O(log n).
+     */
+    public V remove(K key) {
+        TreeNode<K, V> n = this.findNode(key);
+        if (n == null) {
+            throw new NoSuchElementException("Key not found in TreeMap: " + key);
+        }
+        V old = n.value;
+        this.deleteNode(n);
+        return old;
+    }
+
+    /** Clears all nodes and releases references for GC. Complexity: O(n). */
+    public void clear() {
+        this.clearSubtree(this.root);
+        this.root = null;
+        this.count = 0;
+        this.modCount = this.modCount + 1;
+    }
+
+    private void clearSubtree(TreeNode<K, V> n) {
+        if (n == null) return;
+        this.clearSubtree(n.left);
+        this.clearSubtree(n.right);
+        n.key = default(K);
+        n.value = default(V);
+        n.left = null;
+        n.right = null;
+        n.parent = null;
+    }
+
+    /** Returns the lowest key currently in this map. Throws NoSuchElementException if empty. Complexity: O(log n). */
+    public K firstKey() {
+        TreeNode<K, V> n = this.firstNode();
+        if (n == null) {
+            throw new NoSuchElementException("TreeMap is empty");
+        }
+        return n.key;
+    }
+
+    /** Returns the highest key currently in this map. Throws NoSuchElementException if empty. Complexity: O(log n). */
+    public K lastKey() {
+        TreeNode<K, V> n = this.lastNode();
+        if (n == null) {
+            throw new NoSuchElementException("TreeMap is empty");
+        }
+        return n.key;
+    }
+
+    /** Returns the greatest key <= key. Throws NoSuchElementException if none exists. Complexity: O(log n). */
+    public K floorKey(K key) {
+        TreeNode<K, V> cur = this.root;
+        TreeNode<K, V> best = null;
+        while (cur != null) {
+            int c = this.cmp.compare(key, cur.key);
+            if (c == 0) {
+                return cur.key;
+            }
+            if (c > 0) {
+                best = cur;
+                cur = cur.right;
+            } else {
+                cur = cur.left;
+            }
+        }
+        if (best == null) {
+            throw new NoSuchElementException("No floorKey in TreeMap for: " + key);
+        }
+        return best.key;
+    }
+
+    /** Returns the least key >= key. Throws NoSuchElementException if none exists. Complexity: O(log n). */
+    public K ceilingKey(K key) {
+        TreeNode<K, V> cur = this.root;
+        TreeNode<K, V> best = null;
+        while (cur != null) {
+            int c = this.cmp.compare(key, cur.key);
+            if (c == 0) {
+                return cur.key;
+            }
+            if (c < 0) {
+                best = cur;
+                cur = cur.left;
+            } else {
+                cur = cur.right;
+            }
+        }
+        if (best == null) {
+            throw new NoSuchElementException("No ceilingKey in TreeMap for: " + key);
+        }
+        return best.key;
+    }
+
+    /** Returns the greatest key strictly < key. Throws NoSuchElementException if none exists. Complexity: O(log n). */
+    public K lowerKey(K key) {
+        TreeNode<K, V> cur = this.root;
+        TreeNode<K, V> best = null;
+        while (cur != null) {
+            int c = this.cmp.compare(key, cur.key);
+            if (c > 0) {
+                best = cur;
+                cur = cur.right;
+            } else {
+                cur = cur.left;
+            }
+        }
+        if (best == null) {
+            throw new NoSuchElementException("No lowerKey in TreeMap for: " + key);
+        }
+        return best.key;
+    }
+
+    /** Returns the least key strictly > key. Throws NoSuchElementException if none exists. Complexity: O(log n). */
+    public K higherKey(K key) {
+        TreeNode<K, V> cur = this.root;
+        TreeNode<K, V> best = null;
+        while (cur != null) {
+            int c = this.cmp.compare(key, cur.key);
+            if (c < 0) {
+                best = cur;
+                cur = cur.left;
+            } else {
+                cur = cur.right;
+            }
+        }
+        if (best == null) {
+            throw new NoSuchElementException("No higherKey in TreeMap for: " + key);
+        }
+        return best.key;
+    }
+
+    /** Complexity: O(1). */
+    public Set<K> keySet() {
+        return new TreeMapKeySet<K, V>(this);
+    }
+
+    /** Complexity: O(1). */
+    public Collection<V> values() {
+        return new TreeMapValues<K, V>(this);
+    }
+
+    /** Complexity: O(1). */
+    public Set<MapEntry<K, V>> entrySet() {
+        return new TreeMapEntrySet<K, V>(this);
+    }
+
+    /** Complexity: O(n). */
+    public String toString() {
+        ByteBuffer buf = new ByteBuffer(this.count * 8 + 2);
+        buf.appendByte('{');
+        TreeNode<K, V> cur = this.firstNode();
+        boolean first = true;
+        while (cur != null) {
+            if (!first) {
+                buf.appendString(", ");
+            }
+            first = false;
+            buf.appendString("" + cur.key + "=" + cur.value);
+            cur = this.successor(cur);
+        }
+        buf.appendByte('}');
+        return buf.toString();
+    }
+}
+
+public class TreeMapKeyIterator<K, V> implements Iterator<K> {
+    private TreeMap<K, V> map;
+    private TreeNode<K, V> nextNode;
+    private TreeNode<K, V> lastReturned;
+    private int expectedModCount;
+
+    public TreeMapKeyIterator(TreeMap<K, V> map) {
+        this.map = map;
+        this.nextNode = map.firstNode();
+        this.lastReturned = null;
+        this.expectedModCount = map.getModCount();
+    }
+
+    private void checkComod() {
+        if (this.map.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException("TreeMap modified during iteration");
+        }
+    }
+
+    public boolean hasNext() {
+        this.checkComod();
+        return this.nextNode != null;
+    }
+
+    public K next() {
+        this.checkComod();
+        if (this.nextNode == null) {
+            throw new NoSuchElementException("TreeMapKeyIterator: no more elements");
+        }
+        this.lastReturned = this.nextNode;
+        this.nextNode = this.map.successor(this.nextNode);
+        return this.lastReturned.key;
+    }
+
+    public void remove() {
+        if (this.lastReturned == null) {
+            throw new IllegalStateException("TreeMapKeyIterator.remove: invalid state");
+        }
+        this.checkComod();
+        if (this.lastReturned.left != null && this.lastReturned.right != null) {
+            this.nextNode = this.lastReturned;
+        }
+        this.map.deleteNode(this.lastReturned);
+        this.lastReturned = null;
+        this.expectedModCount = this.map.getModCount();
+    }
+}
+
+public class TreeMapValueIterator<K, V> implements Iterator<V> {
+    private TreeMap<K, V> map;
+    private TreeNode<K, V> nextNode;
+    private TreeNode<K, V> lastReturned;
+    private int expectedModCount;
+
+    public TreeMapValueIterator(TreeMap<K, V> map) {
+        this.map = map;
+        this.nextNode = map.firstNode();
+        this.lastReturned = null;
+        this.expectedModCount = map.getModCount();
+    }
+
+    private void checkComod() {
+        if (this.map.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException("TreeMap modified during iteration");
+        }
+    }
+
+    public boolean hasNext() {
+        this.checkComod();
+        return this.nextNode != null;
+    }
+
+    public V next() {
+        this.checkComod();
+        if (this.nextNode == null) {
+            throw new NoSuchElementException("TreeMapValueIterator: no more elements");
+        }
+        this.lastReturned = this.nextNode;
+        this.nextNode = this.map.successor(this.nextNode);
+        return this.lastReturned.value;
+    }
+
+    public void remove() {
+        if (this.lastReturned == null) {
+            throw new IllegalStateException("TreeMapValueIterator.remove: invalid state");
+        }
+        this.checkComod();
+        if (this.lastReturned.left != null && this.lastReturned.right != null) {
+            this.nextNode = this.lastReturned;
+        }
+        this.map.deleteNode(this.lastReturned);
+        this.lastReturned = null;
+        this.expectedModCount = this.map.getModCount();
+    }
+}
+
+public class TreeMapEntryIterator<K, V> implements Iterator<MapEntry<K, V>> {
+    private TreeMap<K, V> map;
+    private TreeNode<K, V> nextNode;
+    private TreeNode<K, V> lastReturned;
+    private int expectedModCount;
+
+    public TreeMapEntryIterator(TreeMap<K, V> map) {
+        this.map = map;
+        this.nextNode = map.firstNode();
+        this.lastReturned = null;
+        this.expectedModCount = map.getModCount();
+    }
+
+    private void checkComod() {
+        if (this.map.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException("TreeMap modified during iteration");
+        }
+    }
+
+    public boolean hasNext() {
+        this.checkComod();
+        return this.nextNode != null;
+    }
+
+    public MapEntry<K, V> next() {
+        this.checkComod();
+        if (this.nextNode == null) {
+            throw new NoSuchElementException("TreeMapEntryIterator: no more elements");
+        }
+        this.lastReturned = this.nextNode;
+        this.nextNode = this.map.successor(this.nextNode);
+        return new MapEntry<K, V>(this.lastReturned.key, this.lastReturned.value);
+    }
+
+    public void remove() {
+        if (this.lastReturned == null) {
+            throw new IllegalStateException("TreeMapEntryIterator.remove: invalid state");
+        }
+        this.checkComod();
+        if (this.lastReturned.left != null && this.lastReturned.right != null) {
+            this.nextNode = this.lastReturned;
+        }
+        this.map.deleteNode(this.lastReturned);
+        this.lastReturned = null;
+        this.expectedModCount = this.map.getModCount();
+    }
+}
+
+public class TreeMapKeySet<K, V> implements Set<K> {
+    private TreeMap<K, V> map;
+
+    public TreeMapKeySet(TreeMap<K, V> map) { this.map = map; }
+    public int size() { return this.map.size(); }
+    public boolean isEmpty() { return this.map.isEmpty(); }
+    public boolean contains(K key) { return this.map.containsKey(key); }
+    public boolean add(K key) {
+        throw new IllegalStateException("TreeMap.keySet does not support add");
+    }
+    public boolean remove(K key) {
+        if (!this.map.containsKey(key)) return false;
+        this.map.remove(key);
+        return true;
+    }
+    public void clear() { this.map.clear(); }
+    public Iterator<K> iterator() { return new TreeMapKeyIterator<K, V>(this.map); }
+    public K[] toArray() {
+        K[] out = new K[this.map.size()];
+        int idx = 0;
+        Iterator<K> it = this.iterator();
+        while (it.hasNext()) {
+            out[idx] = it.next();
+            idx = idx + 1;
+        }
+        return out;
+    }
+    public String toString() {
+        ByteBuffer buf = new ByteBuffer(this.map.size() * 4 + 2);
+        buf.appendByte('[');
+        Iterator<K> it = this.iterator();
+        boolean first = true;
+        while (it.hasNext()) {
+            if (!first) buf.appendString(", ");
+            first = false;
+            buf.appendString("" + it.next());
+        }
+        buf.appendByte(']');
+        return buf.toString();
+    }
+}
+
+public class TreeMapValues<K, V> implements Collection<V> {
+    private TreeMap<K, V> map;
+
+    public TreeMapValues(TreeMap<K, V> map) { this.map = map; }
+    public int size() { return this.map.size(); }
+    public boolean isEmpty() { return this.map.isEmpty(); }
+    public boolean contains(V val) { return this.map.containsValue(val); }
+    public boolean add(V val) {
+        throw new IllegalStateException("TreeMap.values does not support add");
+    }
+    public boolean remove(V val) {
+        Iterator<V> it = this.iterator();
+        while (it.hasNext()) {
+            if (it.next() == val) {
+                it.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+    public void clear() { this.map.clear(); }
+    public Iterator<V> iterator() { return new TreeMapValueIterator<K, V>(this.map); }
+    public V[] toArray() {
+        V[] out = new V[this.map.size()];
+        int idx = 0;
+        Iterator<V> it = this.iterator();
+        while (it.hasNext()) {
+            out[idx] = it.next();
+            idx = idx + 1;
+        }
+        return out;
+    }
+    public String toString() {
+        ByteBuffer buf = new ByteBuffer(this.map.size() * 4 + 2);
+        buf.appendByte('[');
+        Iterator<V> it = this.iterator();
+        boolean first = true;
+        while (it.hasNext()) {
+            if (!first) buf.appendString(", ");
+            first = false;
+            buf.appendString("" + it.next());
+        }
+        buf.appendByte(']');
+        return buf.toString();
+    }
+}
+
+public class TreeMapEntrySet<K, V> implements Set<MapEntry<K, V>> {
+    private TreeMap<K, V> map;
+
+    public TreeMapEntrySet(TreeMap<K, V> map) { this.map = map; }
+    public int size() { return this.map.size(); }
+    public boolean isEmpty() { return this.map.isEmpty(); }
+    public boolean contains(MapEntry<K, V> entry) {
+        if (entry == null) return false;
+        if (!this.map.containsKey(entry.getKey())) return false;
+        return this.map.get(entry.getKey()) == entry.getValue();
+    }
+    public boolean add(MapEntry<K, V> entry) {
+        throw new IllegalStateException("TreeMap.entrySet does not support add");
+    }
+    public boolean remove(MapEntry<K, V> entry) {
+        if (!this.contains(entry)) return false;
+        this.map.remove(entry.getKey());
+        return true;
+    }
+    public void clear() { this.map.clear(); }
+    public Iterator<MapEntry<K, V>> iterator() { return new TreeMapEntryIterator<K, V>(this.map); }
+    public MapEntry<K, V>[] toArray() {
+        MapEntry<K, V>[] out = new MapEntry<K, V>[this.map.size()];
+        int idx = 0;
+        Iterator<MapEntry<K, V>> it = this.iterator();
+        while (it.hasNext()) {
+            out[idx] = it.next();
+            idx = idx + 1;
+        }
+        return out;
+    }
+    public String toString() {
+        ByteBuffer buf = new ByteBuffer(this.map.size() * 8 + 2);
+        buf.appendByte('[');
+        Iterator<MapEntry<K, V>> it = this.iterator();
+        boolean first = true;
+        while (it.hasNext()) {
+            if (!first) buf.appendString(", ");
+            first = false;
+            buf.appendString(it.next().toString());
+        }
+        buf.appendByte(']');
+        return buf.toString();
+    }
+}

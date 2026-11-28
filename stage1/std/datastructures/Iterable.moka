@@ -1,0 +1,11 @@
+import std/datastructures/Iterator;
+
+/**
+ * Implementing this interface allows an object to provide an Iterator<E>.
+ *
+ * Note: Moka does not support enhanced for-each loops; call iterator() explicitly.
+ */
+public interface Iterable<E> {
+    /** Returns an iterator over elements of type E. */
+    Iterator<E> iterator();
+}

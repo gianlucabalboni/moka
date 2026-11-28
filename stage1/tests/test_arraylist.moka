@@ -1,0 +1,169 @@
+import std/Comparable;
+import std/Comparator;
+import std/datastructures/ArrayList;
+import std/datastructures/Collection;
+import std/datastructures/Hasher;
+import std/datastructures/Iterator;
+import std/datastructures/List;
+
+class Task implements Comparable<Task> {
+    public int priority;
+    public String name;
+
+    public Task(int priority, String name) {
+        this.priority = priority;
+        this.name = name;
+    }
+
+    public int compareTo(Task other) {
+        if (this.priority < other.priority) return -1;
+        if (this.priority > other.priority) return 1;
+        return 0;
+    }
+}
+
+class Main {
+    public static int main() {
+        // 1. Basic ops, growth beyond initial capacity, int primitive
+        ArrayList<int> nums = new ArrayList<>();
+        if (!nums.isEmpty() || nums.size() != 0 || !nums.toString().equals("[]")) {
+            Console.eprintln("Empty ArrayList check failed");
+            return 1;
+        }
+        for (int i = 0; i < 100; i++) {
+            nums.add(i);
+        }
+        if (nums.size() != 100 || nums.get(0) != 0 || nums.get(99) != 99) {
+            Console.eprintln("ArrayList growth failed");
+            return 1;
+        }
+
+        // 2. add(index, elem), set, removeAt, remove(elem), indexOf, lastIndexOf
+        nums.add(0, -1);
+        nums.add(50, 999);
+        if (nums.get(0) != -1 || nums.get(50) != 999 || nums.size() != 102) {
+            Console.eprintln("ArrayList insert at index failed");
+            return 1;
+        }
+        int prev = nums.set(50, 888);
+        if (prev != 999 || nums.get(50) != 888) {
+            Console.eprintln("ArrayList set failed");
+            return 1;
+        }
+        int rem = nums.removeAt(50);
+        if (rem != 888 || nums.size() != 101) {
+            Console.eprintln("ArrayList removeAt failed");
+            return 1;
+        }
+        nums.add(5);
+        if (nums.indexOf(5) != 6 || nums.lastIndexOf(5) != 101 || !nums.contains(5)) {
+            Console.eprintln("ArrayList indexOf/lastIndexOf failed");
+            return 1;
+        }
+        if (!nums.remove(5) || nums.remove(123456)) {
+            Console.eprintln("ArrayList remove(elem) failed");
+            return 1;
+        }
+
+        // 3. Out-of-bounds and illegal argument exceptions
+        boolean oob = false;
+        try { nums.get(-1); } catch (IndexOutOfBoundsException e) { oob = true; }
+        if (!oob) { Console.eprintln("get(-1) did not throw"); return 1; }
+
+        oob = false;
+        try { nums.get(nums.size()); } catch (IndexOutOfBoundsException e) { oob = true; }
+        if (!oob) { Console.eprintln("get(size) did not throw"); return 1; }
+
+        oob = false;
+        try { nums.add(nums.size() + 1, 1); } catch (IndexOutOfBoundsException e) { oob = true; }
+        if (!oob) { Console.eprintln("add(size+1) did not throw"); return 1; }
+
+        boolean iae = false;
+        try { new ArrayList<int>(-5); } catch (IllegalArgumentException e) { iae = true; }
+        if (!iae) { Console.eprintln("negative capacity did not throw"); return 1; }
+
+        // 4. Iterator & remove() & fail-fast ConcurrentModificationException
+        ArrayList<int> small = new ArrayList<>();
+        small.add(10);
+        small.add(20);
+        small.add(30);
+        if (!small.toString().equals("[10, 20, 30]")) {
+            Console.eprintln("toString failed: " + small.toString());
+            return 1;
+        }
+        Iterator<int> it = small.iterator();
+        int sum = 0;
+        while (it.hasNext()) {
+            int v = it.next();
+            if (v == 20) {
+                it.remove();
+            } else {
+                sum = sum + v;
+            }
+        }
+        if (sum != 40 || small.size() != 2 || small.get(0) != 10 || small.get(1) != 30) {
+            Console.eprintln("Iterator remove failed");
+            return 1;
+        }
+
+        boolean nse = false;
+        try { it.next(); } catch (NoSuchElementException e) { nse = true; }
+        if (!nse) { Console.eprintln("Iterator next at end did not throw"); return 1; }
+
+        boolean ise = false;
+        try { small.iterator().remove(); } catch (IllegalStateException e) { ise = true; }
+        if (!ise) { Console.eprintln("Iterator remove before next did not throw"); return 1; }
+
+        Iterator<int> ff = small.iterator();
+        small.add(40);
+        boolean cme = false;
+        try { ff.next(); } catch (ConcurrentModificationException e) { cme = true; }
+        if (!cme) { Console.eprintln("Fail-fast CME did not throw"); return 1; }
+
+        // 5. Sort with String (StringComparator) and stability with Task (NaturalOrder)
+        ArrayList<String> words = new ArrayList<>(new StringHasher());
+        words.add("banana");
+        words.add("apple");
+        words.add("cherry");
+        words.add("apricot");
+        words.sort(new StringComparator());
+        if (!words.toString().equals("[apple, apricot, banana, cherry]")) {
+            Console.eprintln("ArrayList<String>.sort failed: " + words.toString());
+            return 1;
+        }
+        if (!words.contains("apricot") || words.indexOf("cherry") != 3) {
+            Console.eprintln("ArrayList<String> StringHasher lookup failed");
+            return 1;
+        }
+
+        ArrayList<Task> tasks = new ArrayList<>();
+        tasks.add(new Task(2, "first-2"));
+        tasks.add(new Task(1, "only-1"));
+        tasks.add(new Task(2, "second-2"));
+        tasks.add(new Task(2, "third-2"));
+        tasks.sort(new NaturalOrder<Task>());
+        if (!tasks.get(0).name.equals("only-1") ||
+            !tasks.get(1).name.equals("first-2") ||
+            !tasks.get(2).name.equals("second-2") ||
+            !tasks.get(3).name.equals("third-2")) {
+            Console.eprintln("ArrayList<Task>.sort stability failed");
+            return 1;
+        }
+
+        // 6. Interface polymorphism (List -> Collection) and clear / equals / toArray
+        Collection<int> col = small;
+        int[] arr = col.toArray();
+        if (arr.length != 3 || arr[2] != 40) {
+            Console.eprintln("toArray failed");
+            return 1;
+        }
+        small.clear();
+        if (!small.isEmpty() || small.size() != 0) {
+            Console.eprintln("clear failed");
+            return 1;
+        }
+
+        Console.println("All Stage 1 ArrayList tests passed!");
+        return 0;
+    }
+}

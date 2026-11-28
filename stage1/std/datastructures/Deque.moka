@@ -1,0 +1,58 @@
+import std/datastructures/Iterator;
+import std/datastructures/Queue;
+
+/**
+ * A linear collection that supports element insertion and removal at both ends.
+ *
+ * Follows java.util.Deque semantics:
+ * - Throwing methods: addFirst, addLast, removeFirst, removeLast, getFirst, getLast
+ * - Special-value methods: offerFirst, offerLast, pollFirst, pollLast, peekFirst, peekLast
+ * - Queue methods (inherited from Queue<E>): add, offer, remove, poll, element, peek
+ * - Stack methods: push, pop
+ */
+public interface Deque<E> extends Queue<E> {
+    /** Inserts the specified element at the front of this deque. */
+    void addFirst(E elem);
+
+    /** Inserts the specified element at the end of this deque. */
+    void addLast(E elem);
+
+    /** Inserts the specified element at the front of this deque. Returns true on success. */
+    boolean offerFirst(E elem);
+
+    /** Inserts the specified element at the end of this deque. Returns true on success. */
+    boolean offerLast(E elem);
+
+    /** Removes and returns the first element. Throws NoSuchElementException if empty. */
+    E removeFirst();
+
+    /** Removes and returns the last element. Throws NoSuchElementException if empty. */
+    E removeLast();
+
+    /** Removes and returns the first element, or default(E) if empty. */
+    E pollFirst();
+
+    /** Removes and returns the last element, or default(E) if empty. */
+    E pollLast();
+
+    /** Returns the first element without removing. Throws NoSuchElementException if empty. */
+    E getFirst();
+
+    /** Returns the last element without removing. Throws NoSuchElementException if empty. */
+    E getLast();
+
+    /** Returns the first element without removing, or default(E) if empty. */
+    E peekFirst();
+
+    /** Returns the last element without removing, or default(E) if empty. */
+    E peekLast();
+
+    /** Stack-equivalent of addFirst(E). */
+    void push(E elem);
+
+    /** Stack-equivalent of removeFirst(). Throws NoSuchElementException if empty. */
+    E pop();
+
+    /** Returns an iterator over the elements from tail to head. */
+    Iterator<E> descendingIterator();
+}

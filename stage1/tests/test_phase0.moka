@@ -1,0 +1,242 @@
+import std/Comparable;
+import std/Comparator;
+
+class Version implements Comparable<Version> {
+    public int major;
+    public int minor;
+
+    public Version(int major, int minor) {
+        this.major = major;
+        this.minor = minor;
+    }
+
+    public int compareTo(Version other) {
+        if (other == null) {
+            throw new NullPointerException("Version.compareTo: null");
+        }
+        if (this.major != other.major) {
+            if (this.major < other.major) return -1;
+            return 1;
+        }
+        if (this.minor != other.minor) {
+            if (this.minor < other.minor) return -1;
+            return 1;
+        }
+        return 0;
+    }
+
+    public boolean equals(Version other) {
+        if (other == null) return false;
+        return this.major == other.major && this.minor == other.minor;
+    }
+}
+
+class Main {
+    private static int sgn(int x) {
+        if (x < 0) return -1;
+        if (x > 0) return 1;
+        return 0;
+    }
+
+    private static String makePseudoRandomString(int seed) {
+        int len = (seed % 7);
+        if (len < 0) len = -len;
+        byte[] buf = new byte[len];
+        int s = seed;
+        for (int i = 0; i < len; i++) {
+            s = (s * 1103515245 + 12345) & 2147483647;
+            int ch = 97 + (s % 6); /* 'a'..'f' so collisions & prefixes happen often */
+            buf[i] = (byte) ch;
+        }
+        return new String(buf);
+    }
+
+    public static int main() {
+        // 1. String implements Comparable<String>
+        Comparable<String> cEmpty = "";
+        Comparable<String> cA = "a";
+        if (cEmpty.compareTo("") != 0) {
+            Console.eprintln("Empty string compareTo failed");
+            return 1;
+        }
+        if (cEmpty.compareTo("a") >= 0 || cA.compareTo("") <= 0) {
+            Console.eprintln("Empty vs non-empty compareTo failed");
+            return 1;
+        }
+
+        // Prefixes
+        if ("abc".compareTo("abcd") != -1 || "abcd".compareTo("abc") != 1) {
+            Console.eprintln("Prefix compareTo failed");
+            return 1;
+        }
+        if ("abc".compareTo("abc") != 0 || !"abc".equals("abc")) {
+            Console.eprintln("Equal string compareTo failed");
+            return 1;
+        }
+
+        // Non-ASCII / UTF-8 (unsigned byte comparison: 0xC3 > 0x7A ('z'))
+        String utfA = "à";
+        String asciiZ = "z";
+        if (utfA.compareTo(asciiZ) <= 0 || asciiZ.compareTo(utfA) >= 0) {
+            Console.eprintln("UTF-8 unsigned byte compareTo failed");
+            return 1;
+        }
+        String cafe1 = "café";
+        String cafe2 = "cafe";
+        if (cafe1.compareTo(cafe2) <= 0) {
+            Console.eprintln("UTF-8 café vs cafe failed");
+            return 1;
+        }
+
+        // compareTo(null) throws NullPointerException
+        boolean npeThrown = false;
+        try {
+            "hello".compareTo(null);
+        } catch (NullPointerException e) {
+            npeThrown = true;
+        }
+        if (!npeThrown) {
+            Console.eprintln("String.compareTo(null) did not throw NullPointerException");
+            return 1;
+        }
+
+        // Transitivity, antisymmetry, and equals consistency on 30 pseudo-random strings
+        String[] samples = new String[30];
+        for (int i = 0; i < 30; i++) {
+            samples[i] = Main.makePseudoRandomString(i * 7919 + 17);
+        }
+        for (int i = 0; i < 30; i++) {
+            for (int j = 0; j < 30; j++) {
+                int cmpIJ = samples[i].compareTo(samples[j]);
+                int cmpJI = samples[j].compareTo(samples[i]);
+                if (Main.sgn(cmpIJ) != -Main.sgn(cmpJI)) {
+                    Console.eprintln("Antisymmetry failed");
+                    return 1;
+                }
+                if ((cmpIJ == 0) != samples[i].equals(samples[j])) {
+                    Console.eprintln("Consistency with equals failed");
+                    return 1;
+                }
+                if (cmpIJ == 0 && samples[i].hashCode() != samples[j].hashCode()) {
+                    Console.eprintln("hashCode consistency failed");
+                    return 1;
+                }
+                for (int k = 0; k < 30; k++) {
+                    int cmpJK = samples[j].compareTo(samples[k]);
+                    int cmpIK = samples[i].compareTo(samples[k]);
+                    if (cmpIJ > 0 && cmpJK > 0 && cmpIK <= 0) {
+                        Console.eprintln("Transitivity (>) failed");
+                        return 1;
+                    }
+                    if (cmpIJ == 0 && Main.sgn(cmpIK) != Main.sgn(cmpJK)) {
+                        Console.eprintln("Congruence (==) failed");
+                        return 1;
+                    }
+                }
+            }
+        }
+
+        // 2. String.hashCode() caching and append() invalidation
+        String s1 = "hello";
+        String s2 = "hel".concat("lo");
+        if (s1.hashCode() != s2.hashCode() || s1.hashCode() != s1.hashCode()) {
+            Console.eprintln("String.hashCode failed");
+            return 1;
+        }
+        int hBefore = s2.hashCode();
+        s2.append("!");
+        if (s2.hashCode() == hBefore || s2.hashCode() != "hello!".hashCode()) {
+            Console.eprintln("String.append did not invalidate cachedHash");
+            return 1;
+        }
+        if ("".hashCode() != "".hashCode()) {
+            Console.eprintln("Empty string hashCode failed");
+            return 1;
+        }
+
+        // 3. String.compareToIgnoreCase
+        if ("Hello".compareToIgnoreCase("hello") != 0) {
+            Console.eprintln("compareToIgnoreCase equal failed");
+            return 1;
+        }
+        if ("abc".compareToIgnoreCase("ABCD") >= 0 || "Z".compareToIgnoreCase("a") <= 0) {
+            Console.eprintln("compareToIgnoreCase ordering failed");
+            return 1;
+        }
+
+        // 4. Comparators (NaturalOrder, ReverseOrder, primitive comparators)
+        Comparator<String> natStr = new NaturalOrder<String>();
+        Comparator<String> revStr = new ReverseOrder<String>(natStr);
+        if (natStr.compare("apple", "banana") >= 0 || revStr.compare("apple", "banana") <= 0) {
+            Console.eprintln("NaturalOrder/ReverseOrder<String> failed");
+            return 1;
+        }
+
+        Comparator<Version> natVer = new NaturalOrder<Version>();
+        Version v1 = new Version(1, 2);
+        Version v2 = new Version(1, 10);
+        Version v3 = new Version(2, 0);
+        if (natVer.compare(v1, v2) >= 0 || natVer.compare(v2, v3) >= 0) {
+            Console.eprintln("NaturalOrder<Version> failed");
+            return 1;
+        }
+
+        Comparator<int> intCmp = new IntComparator();
+        Comparator<int> revIntCmp = new ReverseOrder<int>(intCmp);
+        if (intCmp.compare(-2147483647 - 1, 2147483647) >= 0 || revIntCmp.compare(1, 2) <= 0) {
+            Console.eprintln("IntComparator failed");
+            return 1;
+        }
+
+        Comparator<long> longCmp = new LongComparator();
+        if (longCmp.compare(10000000000L, 10000000001L) >= 0) {
+            Console.eprintln("LongComparator failed");
+            return 1;
+        }
+
+        Comparator<double> dblCmp = new DoubleComparator();
+        if (dblCmp.compare(1.5, 1.5) != 0 || dblCmp.compare(-0.5, 0.5) >= 0) {
+            Console.eprintln("DoubleComparator failed");
+            return 1;
+        }
+
+        Comparator<char> charCmp = new CharComparator();
+        if (charCmp.compare('A', 'B') >= 0) {
+            Console.eprintln("CharComparator failed");
+            return 1;
+        }
+
+        Comparator<boolean> boolCmp = new BooleanComparator();
+        if (boolCmp.compare(false, true) >= 0 || boolCmp.compare(true, true) != 0) {
+            Console.eprintln("BooleanComparator failed");
+            return 1;
+        }
+
+        Comparator<String> strCmp = new StringComparator();
+        Comparator<String> strICmp = new StringIgnoreCaseComparator();
+        if (strCmp.compare("a", "b") >= 0 || strICmp.compare("Alpha", "alpha") != 0) {
+            Console.eprintln("StringComparator / StringIgnoreCaseComparator failed");
+            return 1;
+        }
+
+        // 5. Exception hierarchy
+        int caughtMask = 0;
+        try { throw new IndexOutOfBoundsException("oob"); } catch (IndexOutOfBoundsException e) { caughtMask = caughtMask | 1; }
+        try { throw new NoSuchElementException("nse"); } catch (NoSuchElementException e) { caughtMask = caughtMask | 2; }
+        try { throw new IllegalArgumentException("iae"); } catch (IllegalArgumentException e) { caughtMask = caughtMask | 4; }
+        try { throw new IllegalStateException("ise"); } catch (IllegalStateException e) { caughtMask = caughtMask | 8; }
+        try { throw new ConcurrentModificationException("cme"); } catch (ConcurrentModificationException e) { caughtMask = caughtMask | 16; }
+        try { throw new NullPointerException("npe"); } catch (Exception e) {
+            if (e instanceof NullPointerException && e.getMessage().equals("npe")) {
+                caughtMask = caughtMask | 32;
+            }
+        }
+        if (caughtMask != 63) {
+            Console.eprintln("Exception hierarchy test failed: mask=" + caughtMask);
+            return 1;
+        }
+
+        Console.println("All Stage 1 Phase 0 tests passed!");
+        return 0;
+    }
+}

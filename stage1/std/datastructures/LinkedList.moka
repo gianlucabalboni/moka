@@ -1,0 +1,526 @@
+import std/datastructures/Collection;
+import std/datastructures/Deque;
+import std/datastructures/Hasher;
+import std/datastructures/Iterator;
+import std/datastructures/List;
+import std/datastructures/Queue;
+
+/**
+ * Node in a doubly-linked list.
+ * (Top-level class because Moka does not support nested classes.)
+ */
+public class LinkedNode<E> {
+    public E item;
+    public LinkedNode<E> prev;
+    public LinkedNode<E> next;
+
+    public LinkedNode(LinkedNode<E> prev, E item, LinkedNode<E> next) {
+        this.prev = prev;
+        this.item = item;
+        this.next = next;
+    }
+}
+
+/**
+ * Doubly-linked list implementation of the List<E> and Deque<E> interfaces.
+ *
+ * - Null policy: null elements are permitted for reference types.
+ * - Thread safety: NOT thread-safe.
+ * - GC: unlinked nodes clear item, prev, and next to avoid retaining dead objects.
+ * - Fail-fast: forward and descending iterators throw ConcurrentModificationException.
+ */
+public class LinkedList<E> implements List<E>, Deque<E> {
+    private LinkedNode<E> head;
+    private LinkedNode<E> tail;
+    private int count;
+    private int modCount;
+    private Hasher<E> eq;
+
+    /** Complexity: O(1). */
+    public LinkedList() {
+        this.head = null;
+        this.tail = null;
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = null;
+    }
+
+    /** Complexity: O(1). */
+    public LinkedList(Hasher<E> eq) {
+        this.head = null;
+        this.tail = null;
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = eq;
+    }
+
+    private boolean elemsEqual(E a, E b) {
+        if (this.eq != null) {
+            return this.eq.equals(a, b);
+        }
+        return a == b;
+    }
+
+    private LinkedNode<E> nodeAt(int index) {
+        if (index < (this.count / 2)) {
+            LinkedNode<E> x = this.head;
+            for (int i = 0; i < index; i++) {
+                x = x.next;
+            }
+            return x;
+        } else {
+            LinkedNode<E> x = this.tail;
+            for (int i = this.count - 1; i > index; i--) {
+                x = x.prev;
+            }
+            return x;
+        }
+    }
+
+    private void linkFirst(E elem) {
+        LinkedNode<E> f = this.head;
+        LinkedNode<E> newNode = new LinkedNode<E>(null, elem, f);
+        this.head = newNode;
+        if (f == null) {
+            this.tail = newNode;
+        } else {
+            f.prev = newNode;
+        }
+        this.count = this.count + 1;
+        this.modCount = this.modCount + 1;
+    }
+
+    private void linkLast(E elem) {
+        LinkedNode<E> l = this.tail;
+        LinkedNode<E> newNode = new LinkedNode<E>(l, elem, null);
+        this.tail = newNode;
+        if (l == null) {
+            this.head = newNode;
+        } else {
+            l.next = newNode;
+        }
+        this.count = this.count + 1;
+        this.modCount = this.modCount + 1;
+    }
+
+    private void linkBefore(E elem, LinkedNode<E> succ) {
+        LinkedNode<E> pred = succ.prev;
+        LinkedNode<E> newNode = new LinkedNode<E>(pred, elem, succ);
+        succ.prev = newNode;
+        if (pred == null) {
+            this.head = newNode;
+        } else {
+            pred.next = newNode;
+        }
+        this.count = this.count + 1;
+        this.modCount = this.modCount + 1;
+    }
+
+    /** Internal helpers for iterators. */
+    public int getModCount() { return this.modCount; }
+    public LinkedNode<E> getHeadNode() { return this.head; }
+    public LinkedNode<E> getTailNode() { return this.tail; }
+
+    /** Unlinks node and clears its fields for GC. Complexity: O(1). */
+    public E unlinkNode(LinkedNode<E> x) {
+        E element = x.item;
+        LinkedNode<E> next = x.next;
+        LinkedNode<E> prev = x.prev;
+
+        if (prev == null) {
+            this.head = next;
+        } else {
+            prev.next = next;
+            x.prev = null;
+        }
+
+        if (next == null) {
+            this.tail = prev;
+        } else {
+            next.prev = prev;
+            x.next = null;
+        }
+
+        x.item = default(E);
+        this.count = this.count - 1;
+        this.modCount = this.modCount + 1;
+        return element;
+    }
+
+    /** Complexity: O(1). */
+    public int size() {
+        return this.count;
+    }
+
+    /** Complexity: O(1). */
+    public boolean isEmpty() {
+        return this.count == 0;
+    }
+
+    /** Complexity: O(1). */
+    public void addFirst(E elem) {
+        this.linkFirst(elem);
+    }
+
+    /** Complexity: O(1). */
+    public void addLast(E elem) {
+        this.linkLast(elem);
+    }
+
+    /** Complexity: O(1). */
+    public boolean offerFirst(E elem) {
+        this.linkFirst(elem);
+        return true;
+    }
+
+    /** Complexity: O(1). */
+    public boolean offerLast(E elem) {
+        this.linkLast(elem);
+        return true;
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E removeFirst() {
+        if (this.head == null) {
+            throw new NoSuchElementException("LinkedList is empty");
+        }
+        return this.unlinkNode(this.head);
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E removeLast() {
+        if (this.tail == null) {
+            throw new NoSuchElementException("LinkedList is empty");
+        }
+        return this.unlinkNode(this.tail);
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E pollFirst() {
+        if (this.head == null) {
+            return default(E);
+        }
+        return this.unlinkNode(this.head);
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E pollLast() {
+        if (this.tail == null) {
+            return default(E);
+        }
+        return this.unlinkNode(this.tail);
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E getFirst() {
+        if (this.head == null) {
+            throw new NoSuchElementException("LinkedList is empty");
+        }
+        return this.head.item;
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E getLast() {
+        if (this.tail == null) {
+            throw new NoSuchElementException("LinkedList is empty");
+        }
+        return this.tail.item;
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E peekFirst() {
+        if (this.head == null) {
+            return default(E);
+        }
+        return this.head.item;
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E peekLast() {
+        if (this.tail == null) {
+            return default(E);
+        }
+        return this.tail.item;
+    }
+
+    /** Complexity: O(1). */
+    public boolean add(E elem) {
+        this.linkLast(elem);
+        return true;
+    }
+
+    /** Complexity: O(n). Throws IndexOutOfBoundsException if index < 0 || index > size(). */
+    public void add(int index, E elem) {
+        if (index < 0 || index > this.count) {
+            throw new IndexOutOfBoundsException(
+                "LinkedList index out of bounds: index=" + index + ", size=" + this.count);
+        }
+        if (index == this.count) {
+            this.linkLast(elem);
+        } else {
+            this.linkBefore(elem, this.nodeAt(index));
+        }
+    }
+
+    /** Complexity: O(n). Throws IndexOutOfBoundsException if index < 0 || index >= size(). */
+    public E get(int index) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException(
+                "LinkedList index out of bounds: index=" + index + ", size=" + this.count);
+        }
+        return this.nodeAt(index).item;
+    }
+
+    /** Complexity: O(n). Throws IndexOutOfBoundsException if index < 0 || index >= size(). */
+    public E set(int index, E elem) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException(
+                "LinkedList index out of bounds: index=" + index + ", size=" + this.count);
+        }
+        LinkedNode<E> x = this.nodeAt(index);
+        E old = x.item;
+        x.item = elem;
+        return old;
+    }
+
+    /** Complexity: O(n). Throws IndexOutOfBoundsException if index < 0 || index >= size(). */
+    public E removeAt(int index) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException(
+                "LinkedList index out of bounds: index=" + index + ", size=" + this.count);
+        }
+        return this.unlinkNode(this.nodeAt(index));
+    }
+
+    /** Complexity: O(n). */
+    public boolean remove(E elem) {
+        LinkedNode<E> x = this.head;
+        while (x != null) {
+            if (this.elemsEqual(x.item, elem)) {
+                this.unlinkNode(x);
+                return true;
+            }
+            x = x.next;
+        }
+        return false;
+    }
+
+    /** Complexity: O(n). */
+    public int indexOf(E elem) {
+        int idx = 0;
+        LinkedNode<E> x = this.head;
+        while (x != null) {
+            if (this.elemsEqual(x.item, elem)) {
+                return idx;
+            }
+            idx = idx + 1;
+            x = x.next;
+        }
+        return -1;
+    }
+
+    /** Complexity: O(n). */
+    public int lastIndexOf(E elem) {
+        int idx = this.count - 1;
+        LinkedNode<E> x = this.tail;
+        while (x != null) {
+            if (this.elemsEqual(x.item, elem)) {
+                return idx;
+            }
+            idx = idx - 1;
+            x = x.prev;
+        }
+        return -1;
+    }
+
+    /** Complexity: O(n). */
+    public boolean contains(E elem) {
+        return this.indexOf(elem) >= 0;
+    }
+
+    /** Queue-equivalent of offerLast. Complexity: O(1). */
+    public boolean offer(E elem) {
+        return this.add(elem);
+    }
+
+    /** Queue-equivalent of removeFirst. Complexity: O(1). */
+    public E remove() {
+        return this.removeFirst();
+    }
+
+    /** Queue-equivalent of pollFirst. Complexity: O(1). */
+    public E poll() {
+        return this.pollFirst();
+    }
+
+    /** Queue-equivalent of getFirst. Complexity: O(1). */
+    public E element() {
+        return this.getFirst();
+    }
+
+    /** Queue-equivalent of peekFirst. Complexity: O(1). */
+    public E peek() {
+        return this.peekFirst();
+    }
+
+    /** Stack-equivalent of addFirst. Complexity: O(1). */
+    public void push(E elem) {
+        this.addFirst(elem);
+    }
+
+    /** Stack-equivalent of removeFirst. Complexity: O(1). */
+    public E pop() {
+        return this.removeFirst();
+    }
+
+    /** Clears all links and item references for GC. Complexity: O(n). */
+    public void clear() {
+        LinkedNode<E> x = this.head;
+        while (x != null) {
+            LinkedNode<E> next = x.next;
+            x.item = default(E);
+            x.prev = null;
+            x.next = null;
+            x = next;
+        }
+        this.head = null;
+        this.tail = null;
+        this.count = 0;
+        this.modCount = this.modCount + 1;
+    }
+
+    /** Complexity: O(n). */
+    public E[] toArray() {
+        E[] out = new E[this.count];
+        int i = 0;
+        LinkedNode<E> x = this.head;
+        while (x != null) {
+            out[i] = x.item;
+            i = i + 1;
+            x = x.next;
+        }
+        return out;
+    }
+
+    /** Complexity: O(1). */
+    public Iterator<E> iterator() {
+        return new LinkedListIterator<E>(this);
+    }
+
+    /** Complexity: O(1). */
+    public Iterator<E> descendingIterator() {
+        return new LinkedListDescendingIterator<E>(this);
+    }
+
+    /** Complexity: O(n). */
+    public String toString() {
+        ByteBuffer buf = new ByteBuffer(this.count * 4 + 2);
+        buf.appendByte('[');
+        LinkedNode<E> x = this.head;
+        boolean first = true;
+        while (x != null) {
+            if (!first) {
+                buf.appendString(", ");
+            }
+            first = false;
+            buf.appendString("" + x.item);
+            x = x.next;
+        }
+        buf.appendByte(']');
+        return buf.toString();
+    }
+}
+
+public class LinkedListIterator<E> implements Iterator<E> {
+    private LinkedList<E> list;
+    private LinkedNode<E> nextNode;
+    private LinkedNode<E> lastReturned;
+    private int expectedModCount;
+
+    public LinkedListIterator(LinkedList<E> list) {
+        this.list = list;
+        this.nextNode = list.getHeadNode();
+        this.lastReturned = null;
+        this.expectedModCount = list.getModCount();
+    }
+
+    private void checkComod() {
+        if (this.list.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException("LinkedList modified during iteration");
+        }
+    }
+
+    public boolean hasNext() {
+        this.checkComod();
+        return this.nextNode != null;
+    }
+
+    public E next() {
+        this.checkComod();
+        if (this.nextNode == null) {
+            throw new NoSuchElementException("LinkedListIterator: no more elements");
+        }
+        this.lastReturned = this.nextNode;
+        this.nextNode = this.nextNode.next;
+        return this.lastReturned.item;
+    }
+
+    public void remove() {
+        if (this.lastReturned == null) {
+            throw new IllegalStateException("LinkedListIterator.remove: invalid state");
+        }
+        this.checkComod();
+        LinkedNode<E> lastNext = this.lastReturned.next;
+        this.list.unlinkNode(this.lastReturned);
+        if (this.nextNode == this.lastReturned) {
+            this.nextNode = lastNext;
+        }
+        this.lastReturned = null;
+        this.expectedModCount = this.list.getModCount();
+    }
+}
+
+public class LinkedListDescendingIterator<E> implements Iterator<E> {
+    private LinkedList<E> list;
+    private LinkedNode<E> nextNode;
+    private LinkedNode<E> lastReturned;
+    private int expectedModCount;
+
+    public LinkedListDescendingIterator(LinkedList<E> list) {
+        this.list = list;
+        this.nextNode = list.getTailNode();
+        this.lastReturned = null;
+        this.expectedModCount = list.getModCount();
+    }
+
+    private void checkComod() {
+        if (this.list.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException("LinkedList modified during iteration");
+        }
+    }
+
+    public boolean hasNext() {
+        this.checkComod();
+        return this.nextNode != null;
+    }
+
+    public E next() {
+        this.checkComod();
+        if (this.nextNode == null) {
+            throw new NoSuchElementException("LinkedListDescendingIterator: no more elements");
+        }
+        this.lastReturned = this.nextNode;
+        this.nextNode = this.nextNode.prev;
+        return this.lastReturned.item;
+    }
+
+    public void remove() {
+        if (this.lastReturned == null) {
+            throw new IllegalStateException("LinkedListDescendingIterator.remove: invalid state");
+        }
+        this.checkComod();
+        this.list.unlinkNode(this.lastReturned);
+        this.lastReturned = null;
+        this.expectedModCount = this.list.getModCount();
+    }
+}

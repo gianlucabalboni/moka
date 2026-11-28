@@ -1072,6 +1072,14 @@ public class Parser {
             cls.superType = st;
             cls.superName = st.className;
         }
+        if (isIface && this.match(TokenKind.KW_EXTENDS())) {
+            Type it = this.parseBaseType(false);
+            cls.addImplSpec(it.className, it);
+            while (!this.hadError && this.match(TokenKind.COMMA())) {
+                it = this.parseBaseType(false);
+                cls.addImplSpec(it.className, it);
+            }
+        }
         if (!isIface && this.match(TokenKind.KW_IMPLEMENTS())) {
             Type it = this.parseBaseType(false);
             cls.addImplSpec(it.className, it);

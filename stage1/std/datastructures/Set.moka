@@ -1,0 +1,7 @@
+import std/datastructures/Collection;
+
+/**
+ * A collection that contains no duplicate elements.
+ */
+public interface Set<E> extends Collection<E> {
+}

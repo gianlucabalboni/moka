@@ -1,0 +1,83 @@
+import std/Comparator;
+import std/datastructures/ArrayList;
+import std/datastructures/HashMap;
+import std/datastructures/Hasher;
+import std/datastructures/PriorityQueue;
+import std/datastructures/TreeMap;
+
+class Main {
+    private static native long rt_monotonic_ms();
+
+    public static int main() {
+        int n = 1000000;
+
+        // 1. ArrayList<int>: 1M insert, 1M read, 1M removeAt(last)
+        long t0 = Main.rt_monotonic_ms();
+        ArrayList<int> list = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            list.add(i);
+        }
+        long sum = 0L;
+        for (int i = 0; i < n; i++) {
+            sum += list.get(i);
+        }
+        while (!list.isEmpty()) {
+            list.removeAt(list.size() - 1);
+        }
+        long t1 = Main.rt_monotonic_ms();
+        Console.println("ArrayList (1M ins/read/rem): " + (t1 - t0) + " ms, sum=" + sum);
+
+        // 2. HashMap<int, int>: 1M insert, 1M read, 1M remove
+        long t2 = Main.rt_monotonic_ms();
+        HashMap<int, int> hmap = new HashMap<>(new IntHasher());
+        for (int i = 0; i < n; i++) {
+            hmap.put(i, i + 1);
+        }
+        long hsum = 0L;
+        for (int i = 0; i < n; i++) {
+            hsum += hmap.get(i);
+        }
+        for (int i = 0; i < n; i++) {
+            hmap.remove(i);
+        }
+        long t3 = Main.rt_monotonic_ms();
+        Console.println("HashMap (1M ins/read/rem): " + (t3 - t2) + " ms, sum=" + hsum);
+
+        // 3. TreeMap<int, int>: 1M insert, 1M read, 1M remove
+        long t4 = Main.rt_monotonic_ms();
+        TreeMap<int, int> tmap = new TreeMap<>(new IntComparator());
+        for (int i = 0; i < n; i++) {
+            int k = (int) (((long) i * 2654435761L) & 1048575L);
+            tmap.put(k, i);
+        }
+        long tsum = 0L;
+        for (int i = 0; i < n; i++) {
+            int k = (int) (((long) i * 2654435761L) & 1048575L);
+            tsum += tmap.getOrDefault(k, 0);
+        }
+        for (int i = 0; i < n; i++) {
+            int k = (int) (((long) i * 2654435761L) & 1048575L);
+            if (tmap.containsKey(k)) {
+                tmap.remove(k);
+            }
+        }
+        long t5 = Main.rt_monotonic_ms();
+        Console.println("TreeMap (1M ins/read/rem): " + (t5 - t4) + " ms, sum=" + tsum);
+
+        // 4. PriorityQueue<int>: 1M offer, 1M peek, 1M poll
+        long t6 = Main.rt_monotonic_ms();
+        PriorityQueue<int> pq = new PriorityQueue<>(new IntComparator());
+        for (int i = 0; i < n; i++) {
+            pq.offer((int) ((((long) i * 1103515245L + 12345L) & 1048575L)));
+        }
+        long psum = 0L;
+        while (!pq.isEmpty()) {
+            psum += pq.peek();
+            pq.poll();
+        }
+        long t7 = Main.rt_monotonic_ms();
+        Console.println("PriorityQueue (1M ins/peek/rem): " + (t7 - t6) + " ms, sum=" + psum);
+
+        return 0;
+    }
+}

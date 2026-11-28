@@ -1,0 +1,79 @@
+import std/datastructures/Collection;
+import std/datastructures/HashMap;
+import std/datastructures/Hasher;
+import std/datastructures/Iterator;
+import std/datastructures/Set;
+
+/**
+ * Hash table based implementation of the Set<E> interface, backed by HashMap<E, boolean>.
+ *
+ * - Null policy: depends on Hasher<E> (StringHasher rejects null).
+ * - Thread safety: NOT thread-safe.
+ * - Fail-fast: iterator delegates to HashMap.keySet().iterator().
+ */
+public class HashSet<E> implements Set<E> {
+    private HashMap<E, boolean> map;
+
+    /** Complexity: O(1). */
+    public HashSet(Hasher<E> hasher) {
+        this.map = new HashMap<E, boolean>(hasher);
+    }
+
+    /** Complexity: O(initialCapacity). */
+    public HashSet(int initialCapacity, Hasher<E> hasher) {
+        this.map = new HashMap<E, boolean>(initialCapacity, hasher);
+    }
+
+    /** Complexity: O(1). */
+    public int size() {
+        return this.map.size();
+    }
+
+    /** Complexity: O(1). */
+    public boolean isEmpty() {
+        return this.map.isEmpty();
+    }
+
+    /** Complexity: O(1) expected. */
+    public boolean contains(E elem) {
+        return this.map.containsKey(elem);
+    }
+
+    /** Complexity: O(1) amortized expected. */
+    public boolean add(E elem) {
+        if (this.map.containsKey(elem)) {
+            return false;
+        }
+        this.map.put(elem, true);
+        return true;
+    }
+
+    /** Complexity: O(1) expected. */
+    public boolean remove(E elem) {
+        if (!this.map.containsKey(elem)) {
+            return false;
+        }
+        this.map.remove(elem);
+        return true;
+    }
+
+    /** Complexity: O(capacity). */
+    public void clear() {
+        this.map.clear();
+    }
+
+    /** Complexity: O(1). */
+    public Iterator<E> iterator() {
+        return this.map.keySet().iterator();
+    }
+
+    /** Complexity: O(capacity). */
+    public E[] toArray() {
+        return this.map.keySet().toArray();
+    }
+
+    /** Complexity: O(capacity). */
+    public String toString() {
+        return this.map.keySet().toString();
+    }
+}

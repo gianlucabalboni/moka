@@ -1,0 +1,79 @@
+import std/datastructures/Deque;
+import std/datastructures/Hasher;
+import std/datastructures/Iterator;
+import std/datastructures/LinkedList;
+import std/datastructures/List;
+import std/datastructures/Queue;
+
+class Main {
+    public static int main() {
+        // 1. List<int> + Deque<int> dual interface
+        LinkedList<int> ll = new LinkedList<>();
+        ll.add(10);
+        ll.add(30);
+        ll.add(1, 20);
+        ll.addFirst(5);
+        ll.addLast(40);
+        if (!ll.toString().equals("[5, 10, 20, 30, 40]") || ll.size() != 5) {
+            Console.eprintln("LinkedList basic ops failed: " + ll.toString());
+            return 1;
+        }
+        if (ll.get(0) != 5 || ll.get(2) != 20 || ll.get(4) != 40) {
+            Console.eprintln("LinkedList.get failed");
+            return 1;
+        }
+        ll.set(2, 25);
+        if (ll.removeAt(2) != 25 || ll.removeFirst() != 5 || ll.removeLast() != 40) {
+            Console.eprintln("LinkedList remove ops failed");
+            return 1;
+        }
+
+        // 2. Exceptions
+        boolean oob = false;
+        try { ll.get(99); } catch (IndexOutOfBoundsException e) { oob = true; }
+        if (!oob) { Console.eprintln("LinkedList.get OOB did not throw"); return 1; }
+
+        LinkedList<String> sll = new LinkedList<>(new StringHasher());
+        boolean nse = false;
+        try { sll.removeFirst(); } catch (NoSuchElementException e) { nse = true; }
+        if (!nse) { Console.eprintln("LinkedList empty removeFirst did not throw"); return 1; }
+
+        // 3. Iterators (forward, descending, remove, fail-fast)
+        sll.add("a");
+        sll.add("b");
+        sll.add("c");
+        Iterator<String> it = sll.iterator();
+        while (it.hasNext()) {
+            if (it.next().equals("b")) {
+                it.remove();
+            }
+        }
+        if (!sll.toString().equals("[a, c]")) {
+            Console.eprintln("LinkedList iterator.remove failed: " + sll.toString());
+            return 1;
+        }
+
+        Iterator<String> dit = sll.descendingIterator();
+        if (!dit.next().equals("c") || !dit.next().equals("a") || dit.hasNext()) {
+            Console.eprintln("LinkedList descendingIterator failed");
+            return 1;
+        }
+
+        Iterator<String> ff = sll.iterator();
+        sll.push("z");
+        boolean cme = false;
+        try { ff.next(); } catch (ConcurrentModificationException e) { cme = true; }
+        if (!cme) { Console.eprintln("LinkedList fail-fast failed"); return 1; }
+
+        // 4. Interface polymorphism
+        List<String> asList = sll;
+        Deque<String> asDeque = sll;
+        if (asList.indexOf("c") != 2 || !asDeque.pop().equals("z")) {
+            Console.eprintln("LinkedList polymorphism failed");
+            return 1;
+        }
+
+        Console.println("All Stage 1 LinkedList tests passed!");
+        return 0;
+    }
+}

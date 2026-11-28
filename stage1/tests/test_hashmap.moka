@@ -1,0 +1,217 @@
+import std/datastructures/Collection;
+import std/datastructures/HashMap;
+import std/datastructures/HashSet;
+import std/datastructures/Hasher;
+import std/datastructures/Iterator;
+import std/datastructures/Map;
+import std/datastructures/MapEntry;
+import std/datastructures/Set;
+
+class Point {
+    public int x;
+    public int y;
+    public Point(int x, int y) { this.x = x; this.y = y; }
+    public String toString() { return "(" + this.x + "," + this.y + ")"; }
+}
+
+class PointHasher implements Hasher<Point> {
+    public int hash(Point p) {
+        if (p == null) throw new NullPointerException("PointHasher: null");
+        return p.x * 31 + p.y;
+    }
+    public boolean equals(Point a, Point b) {
+        if (a == null || b == null) throw new NullPointerException("PointHasher: null");
+        return a.x == b.x && a.y == b.y;
+    }
+}
+
+class CollidingIntHasher implements Hasher<int> {
+    public int hash(int key) {
+        return 7; /* Force 100% hash collisions to stress linear probing & backward-shift */
+    }
+    public boolean equals(int a, int b) {
+        return a == b;
+    }
+}
+
+class NaiveIntMap {
+    private int[] keys;
+    private int[] vals;
+    private int count;
+
+    public NaiveIntMap(int maxCap) {
+        this.keys = new int[maxCap];
+        this.vals = new int[maxCap];
+        this.count = 0;
+    }
+
+    public int size() { return this.count; }
+
+    private int find(int k) {
+        for (int i = 0; i < this.count; i++) {
+            if (this.keys[i] == k) return i;
+        }
+        return -1;
+    }
+
+    public boolean containsKey(int k) { return this.find(k) >= 0; }
+
+    public int getOrDefault(int k, int defVal) {
+        int idx = this.find(k);
+        if (idx < 0) return defVal;
+        return this.vals[idx];
+    }
+
+    public int put(int k, int v) {
+        int idx = this.find(k);
+        if (idx >= 0) {
+            int old = this.vals[idx];
+            this.vals[idx] = v;
+            return old;
+        }
+        this.keys[this.count] = k;
+        this.vals[this.count] = v;
+        this.count = this.count + 1;
+        return 0;
+    }
+
+    public int remove(int k) {
+        int idx = this.find(k);
+        int old = this.vals[idx];
+        this.keys[idx] = this.keys[this.count - 1];
+        this.vals[idx] = this.vals[this.count - 1];
+        this.count = this.count - 1;
+        return old;
+    }
+}
+
+class Main {
+    public static int main() {
+        // 1. Basic HashMap<String, int> (replaces StringMap)
+        Map<String, int> ages = new HashMap<>(new StringHasher());
+        if (!ages.isEmpty() || ages.size() != 0 || ages.getOrDefault("Alice", -1) != -1) {
+            Console.eprintln("Empty HashMap check failed");
+            return 1;
+        }
+        ages.put("Alice", 30);
+        ages.put("Bob", 25);
+        int prev = ages.put("Alice", 31);
+        if (prev != 30 || ages.size() != 2 || ages.get("Alice") != 31 || !ages.containsKey("Bob")) {
+            Console.eprintln("HashMap put/get failed");
+            return 1;
+        }
+
+        boolean nse = false;
+        try { ages.get("Missing"); } catch (NoSuchElementException e) { nse = true; }
+        if (!nse) { Console.eprintln("HashMap.get missing did not throw"); return 1; }
+
+        nse = false;
+        try { ages.remove("Missing"); } catch (NoSuchElementException e) { nse = true; }
+        if (!nse) { Console.eprintln("HashMap.remove missing did not throw"); return 1; }
+
+        // 2. Forced hash collisions + backward-shift deletion + iterator remove
+        HashMap<int, int> colMap = new HashMap<>(16, new CollidingIntHasher());
+        for (int i = 0; i < 10; i++) {
+            colMap.put(i, i * 10);
+        }
+        // Delete alternating keys in the middle of the probe chain
+        for (int i = 0; i < 10; i += 2) {
+            int rem = colMap.remove(i);
+            if (rem != i * 10) {
+                Console.eprintln("Collision remove failed for " + i);
+                return 1;
+            }
+        }
+        for (int i = 0; i < 10; i++) {
+            if (i % 2 == 0) {
+                if (colMap.containsKey(i)) { Console.eprintln("Deleted key still found: " + i); return 1; }
+            } else {
+                if (!colMap.containsKey(i) || colMap.get(i) != i * 10) {
+                    Console.eprintln("Surviving key lost after backward-shift: " + i);
+                    return 1;
+                }
+            }
+        }
+        // Iterator.remove() across all remaining colliding entries (tests shiftedIntoI)
+        Iterator<int> kit = colMap.keySet().iterator();
+        int visitedCount = 0;
+        while (kit.hasNext()) {
+            kit.next();
+            visitedCount = visitedCount + 1;
+            kit.remove();
+        }
+        if (visitedCount != 5 || !colMap.isEmpty()) {
+            Console.eprintln("HashMap iterator.remove with collisions failed: visited=" + visitedCount + ", size=" + colMap.size());
+            return 1;
+        }
+
+        // 3. User-defined class key (Point) & entrySet/values/fail-fast
+        HashMap<Point, String> pts = new HashMap<>(new PointHasher());
+        pts.put(new Point(1, 2), "A");
+        pts.put(new Point(3, 4), "B");
+        if (!pts.get(new Point(1, 2)).equals("A") || pts.entrySet().size() != 2 || pts.values().size() != 2) {
+            Console.eprintln("HashMap<Point, String> failed");
+            return 1;
+        }
+        Iterator<MapEntry<Point, String>> eit = pts.entrySet().iterator();
+        pts.put(new Point(5, 6), "C");
+        boolean cme = false;
+        try { eit.next(); } catch (ConcurrentModificationException e) { cme = true; }
+        if (!cme) { Console.eprintln("HashMap fail-fast CME did not throw"); return 1; }
+
+        // 4. HashSet<String>
+        Set<String> set = new HashSet<>(new StringHasher());
+        if (!set.add("x") || set.add("x") || !set.add("y") || set.size() != 2 || !set.contains("x")) {
+            Console.eprintln("HashSet add/contains failed");
+            return 1;
+        }
+        if (!set.remove("x") || set.remove("x") || set.size() != 1) {
+            Console.eprintln("HashSet remove failed");
+            return 1;
+        }
+
+        // 5. Differential test: 10,000 random operations against NaiveIntMap (fixed seed)
+        HashMap<int, int> fast = new HashMap<>(new IntHasher());
+        NaiveIntMap naive = new NaiveIntMap(512);
+        long seed = 123456789L;
+        for (int step = 0; step < 10000; step++) {
+            seed = (seed * 6364136223846793005L + 1442695040888963407L) & 2147483647L;
+            int op = (int) (seed % 10L);
+            int key = (int) ((seed / 10L) % 300L);
+            int val = (int) (seed % 10000L);
+            if (op < 5) {
+                int r1 = fast.put(key, val);
+                int r2 = naive.put(key, val);
+                if (r1 != r2) {
+                    Console.eprintln("Diff put mismatch at step " + step);
+                    return 1;
+                }
+            } else if (op < 8) {
+                boolean c1 = fast.containsKey(key);
+                boolean c2 = naive.containsKey(key);
+                int g1 = fast.getOrDefault(key, -999);
+                int g2 = naive.getOrDefault(key, -999);
+                if (c1 != c2 || g1 != g2) {
+                    Console.eprintln("Diff get mismatch at step " + step);
+                    return 1;
+                }
+            } else {
+                if (naive.containsKey(key)) {
+                    int r1 = fast.remove(key);
+                    int r2 = naive.remove(key);
+                    if (r1 != r2) {
+                        Console.eprintln("Diff remove mismatch at step " + step);
+                        return 1;
+                    }
+                }
+            }
+            if (fast.size() != naive.size()) {
+                Console.eprintln("Diff size mismatch at step " + step);
+                return 1;
+            }
+        }
+
+        Console.println("All Stage 1 HashMap & HashSet tests passed!");
+        return 0;
+    }
+}

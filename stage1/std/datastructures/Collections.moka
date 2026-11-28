@@ -1,0 +1,118 @@
+import std/Comparator;
+import std/datastructures/ArrayList;
+import std/datastructures/Collection;
+import std/datastructures/Iterator;
+import std/datastructures/List;
+
+/**
+ * Static utility algorithms operating on collections and lists.
+ */
+public static class Collections {
+    /** Sorts an ArrayList<E> in place using stable merge sort. Complexity: O(n log n). */
+    public static <E> void sort(ArrayList<E> list, Comparator<E> cmp) {
+        if (list == null) {
+            throw new NullPointerException("Collections.sort: list is null");
+        }
+        list.sort(cmp);
+    }
+
+    /**
+     * Searches a sorted List<E> for key using binary search.
+     * Returns index of key if found, or -(insertionPoint) - 1 if absent.
+     * Complexity: O(log n) for random-access lists (ArrayList).
+     */
+    public static <E> int binarySearch(List<E> list, E key, Comparator<E> cmp) {
+        if (list == null || cmp == null) {
+            throw new NullPointerException("Collections.binarySearch: null argument");
+        }
+        int lo = 0;
+        int hi = list.size() - 1;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            int c = cmp.compare(list.get(mid), key);
+            if (c < 0) {
+                lo = mid + 1;
+            } else if (c > 0) {
+                hi = mid - 1;
+            } else {
+                return mid;
+            }
+        }
+        return -(lo + 1);
+    }
+
+    /** Swaps elements at positions i and j in list. Complexity: O(1) for ArrayList. */
+    public static <E> void swap(List<E> list, int i, int j) {
+        if (list == null) {
+            throw new NullPointerException("Collections.swap: list is null");
+        }
+        E tmp = list.get(i);
+        list.set(i, list.get(j));
+        list.set(j, tmp);
+    }
+
+    /** Reverses the order of elements in list in place. Complexity: O(n) for ArrayList. */
+    public static <E> void reverse(List<E> list) {
+        if (list == null) {
+            throw new NullPointerException("Collections.reverse: list is null");
+        }
+        int i = 0;
+        int j = list.size() - 1;
+        while (i < j) {
+            E tmp = list.get(i);
+            list.set(i, list.get(j));
+            list.set(j, tmp);
+            i = i + 1;
+            j = j - 1;
+        }
+    }
+
+    /** Replaces all elements of list with val. Complexity: O(n) for ArrayList. */
+    public static <E> void fill(List<E> list, E val) {
+        if (list == null) {
+            throw new NullPointerException("Collections.fill: list is null");
+        }
+        int n = list.size();
+        for (int i = 0; i < n; i++) {
+            list.set(i, val);
+        }
+    }
+
+    /** Returns the minimum element of col according to cmp. Throws NoSuchElementException if empty. Complexity: O(n). */
+    public static <E> E min(Collection<E> col, Comparator<E> cmp) {
+        if (col == null || cmp == null) {
+            throw new NullPointerException("Collections.min: null argument");
+        }
+        Iterator<E> it = col.iterator();
+        if (!it.hasNext()) {
+            throw new NoSuchElementException("Collections.min: empty collection");
+        }
+        E best = it.next();
+        while (it.hasNext()) {
+            E cand = it.next();
+            if (cmp.compare(cand, best) < 0) {
+                best = cand;
+            }
+        }
+        return best;
+    }
+
+    /** Returns the maximum element of col according to cmp. Throws NoSuchElementException if empty. Complexity: O(n). */
+    public static <E> E max(Collection<E> col, Comparator<E> cmp) {
+        if (col == null || cmp == null) {
+            throw new NullPointerException("Collections.max: null argument");
+        }
+        Iterator<E> it = col.iterator();
+        if (!it.hasNext()) {
+            throw new NoSuchElementException("Collections.max: empty collection");
+        }
+        E best = it.next();
+        while (it.hasNext()) {
+            E cand = it.next();
+            if (cmp.compare(cand, best) > 0) {
+                best = cand;
+            }
+        }
+        return best;
+    }
+}

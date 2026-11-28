@@ -1,0 +1,35 @@
+public class IndexOutOfBoundsException extends Exception {
+    public IndexOutOfBoundsException(String message) {
+        super(message);
+    }
+}
+
+public class NoSuchElementException extends Exception {
+    public NoSuchElementException(String message) {
+        super(message);
+    }
+}
+
+public class IllegalArgumentException extends Exception {
+    public IllegalArgumentException(String message) {
+        super(message);
+    }
+}
+
+public class IllegalStateException extends Exception {
+    public IllegalStateException(String message) {
+        super(message);
+    }
+}
+
+public class ConcurrentModificationException extends Exception {
+    public ConcurrentModificationException(String message) {
+        super(message);
+    }
+}
+
+public class NullPointerException extends Exception {
+    public NullPointerException(String message) {
+        super(message);
+    }
+}

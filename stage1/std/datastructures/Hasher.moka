@@ -1,0 +1,96 @@
+/**
+ * Strategy interface for hashing and equality of keys/elements of type K.
+ *
+ * Note: Moka has no root Object class with hashCode()/equals(), and supports
+ * unboxed primitive type arguments (int, long, double, char, boolean).
+ * HashMap and HashSet use Hasher<K> to avoid boxing and support custom equality.
+ */
+public interface Hasher<K> {
+    /** Returns a 32-bit hash code for key. Equal keys must produce equal hashes. */
+    int hash(K key);
+
+    /** Returns true if a and b are considered equal. */
+    boolean equals(K a, K b);
+}
+
+/**
+ * Unboxed Hasher for primitive int using SplitMix32 mixing.
+ */
+public class IntHasher implements Hasher<int> {
+    public int hash(int key) {
+        long x = (long) key & 4294967295L;
+        x = ((x >> 16) ^ x) * 73244475L;
+        x = x & 4294967295L;
+        x = ((x >> 16) ^ x) * 73244475L;
+        x = x & 4294967295L;
+        x = (x >> 16) ^ x;
+        return (int) x;
+    }
+
+    public boolean equals(int a, int b) {
+        return a == b;
+    }
+}
+
+/**
+ * Unboxed Hasher for primitive long.
+ */
+public class LongHasher implements Hasher<long> {
+    public int hash(long key) {
+        long x = key ^ (key >> 32);
+        return (int) x;
+    }
+
+    public boolean equals(long a, long b) {
+        return a == b;
+    }
+}
+
+/**
+ * Unboxed Hasher for primitive char.
+ */
+public class CharHasher implements Hasher<char> {
+    public int hash(char key) {
+        return (int) key;
+    }
+
+    public boolean equals(char a, char b) {
+        return a == b;
+    }
+}
+
+/**
+ * Unboxed Hasher for primitive boolean.
+ */
+public class BooleanHasher implements Hasher<boolean> {
+    public int hash(boolean key) {
+        if (key) {
+            return 1231;
+        }
+        return 1237;
+    }
+
+    public boolean equals(boolean a, boolean b) {
+        return a == b;
+    }
+}
+
+/**
+ * Hasher for String using cached String.hashCode() and String.equals().
+ * Null keys are rejected with NullPointerException.
+ */
+public class StringHasher implements Hasher<String> {
+    public int hash(String key) {
+        if (key == null) {
+            throw new NullPointerException("StringHasher.hash: null key");
+        }
+        return key.hashCode();
+    }
+
+    public boolean equals(String a, String b) {
+        if (a == null || b == null) {
+            throw new NullPointerException("StringHasher.equals: null key");
+        }
+        return a.equals(b);
+    }
+}

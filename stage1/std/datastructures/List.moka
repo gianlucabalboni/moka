@@ -1,9 +1,46 @@
-public interface List<T> {
-    int size();
-    boolean isEmpty();
-    void add(T item);
-    T get(int index);
-    void set(int index, T item);
-    T removeAt(int index);
-    void clear();
+import std/datastructures/Collection;
+
+/**
+ * An ordered collection (sequence).
+ *
+ * Note: Because Moka monomorphizes primitive type arguments (where List<int> would
+ * collide remove(E) with remove(int)), index-based removal is named removeAt(int index)
+ * and element-based removal is remove(E elem) inherited from Collection<E>.
+ */
+public interface List<E> extends Collection<E> {
+    /**
+     * Inserts the specified element at the specified position in this list.
+     * Throws IndexOutOfBoundsException if index < 0 || index > size().
+     */
+    void add(int index, E elem);
+
+    /**
+     * Returns the element at the specified position in this list.
+     * Throws IndexOutOfBoundsException if index < 0 || index >= size().
+     */
+    E get(int index);
+
+    /**
+     * Replaces the element at the specified position in this list.
+     * Returns the element previously at the specified position.
+     * Throws IndexOutOfBoundsException if index < 0 || index >= size().
+     */
+    E set(int index, E elem);
+
+    /**
+     * Removes the element at the specified position in this list.
+     * Returns the element that was removed.
+     * Throws IndexOutOfBoundsException if index < 0 || index >= size().
+     */
+    E removeAt(int index);
+
+    /**
+     * Returns the index of the first occurrence of the specified element, or -1 if absent.
+     */
+    int indexOf(E elem);
+
+    /**
+     * Returns the index of the last occurrence of the specified element, or -1 if absent.
+     */
+    int lastIndexOf(E elem);
 }

@@ -1,63 +1,459 @@
+import std/Comparator;
+import std/datastructures/Collection;
+import std/datastructures/Hasher;
+import std/datastructures/Iterable;
+import std/datastructures/Iterator;
 import std/datastructures/List;
 
-public class ArrayList<T> implements List<T> {
-    private T[] items;
+/**
+ * Resizable-array implementation of the List<E> interface.
+ *
+ * - Null policy: null elements are permitted for reference types.
+ * - Thread safety: NOT thread-safe; external synchronization is required for
+ *   concurrent modification.
+ * - Equality: uses the optional Hasher<E> if provided, otherwise '=='.
+ * - Fail-fast: iterators throw ConcurrentModificationException on concurrent
+ *   structural modification.
+ */
+public class ArrayList<E> implements List<E> {
+    private E[] items;
     private int count;
+    private int modCount;
+    private Hasher<E> eq;
 
+    /**
+     * Constructs an empty list with an initial capacity of 8.
+     * Complexity: O(1).
+     */
     public ArrayList() {
-        items = new T[8];
-        count = 0;
+        this.items = new E[8];
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = null;
     }
 
+    /**
+     * Constructs an empty list with the specified initial capacity.
+     * Throws IllegalArgumentException if initialCapacity < 0.
+     * Complexity: O(n) in initialCapacity.
+     */
+    public ArrayList(int initialCapacity) {
+        if (initialCapacity < 0) {
+            throw new IllegalArgumentException(
+                "ArrayList negative initial capacity: " + initialCapacity);
+        }
+        int cap = initialCapacity;
+        if (cap == 0) {
+            cap = 8;
+        }
+        this.items = new E[cap];
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = null;
+    }
+
+    /**
+     * Constructs an empty list with a custom equality strategy (Hasher<E>).
+     * Complexity: O(1).
+     */
+    public ArrayList(Hasher<E> eq) {
+        this.items = new E[8];
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = eq;
+    }
+
+    /**
+     * Constructs an empty list with the specified initial capacity and Hasher<E>.
+     * Throws IllegalArgumentException if initialCapacity < 0.
+     * Complexity: O(n) in initialCapacity.
+     */
+    public ArrayList(int initialCapacity, Hasher<E> eq) {
+        if (initialCapacity < 0) {
+            throw new IllegalArgumentException(
+                "ArrayList negative initial capacity: " + initialCapacity);
+        }
+        int cap = initialCapacity;
+        if (cap == 0) {
+            cap = 8;
+        }
+        this.items = new E[cap];
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = eq;
+    }
+
+    private boolean elemsEqual(E a, E b) {
+        if (this.eq != null) {
+            return this.eq.equals(a, b);
+        }
+        return a == b;
+    }
+
+    private void ensureCapacity(int minCapacity) {
+        if (minCapacity <= this.items.length) {
+            return;
+        }
+        int newCap = this.items.length * 2;
+        if (newCap < minCapacity) {
+            newCap = minCapacity;
+        }
+        E[] next = new E[newCap];
+        for (int i = 0; i < this.count; i++) {
+            next[i] = this.items[i];
+        }
+        this.items = next;
+    }
+
+    /**
+     * Returns the number of elements in this list.
+     * Complexity: O(1).
+     */
     public int size() {
-        return count;
+        return this.count;
     }
 
+    /**
+     * Returns true if this list contains no elements.
+     * Complexity: O(1).
+     */
     public boolean isEmpty() {
-        return count == 0;
+        return this.count == 0;
     }
 
-    public void add(T item) {
-        if (count >= items.length) {
-            T[] next = new T[items.length * 2];
-            for (int i = 0; i < count; i++) {
-                next[i] = items[i];
-            }
-            items = next;
-        }
-        items[count] = item;
-        count++;
+    /**
+     * Returns the internal modification counter (used by ArrayListIterator).
+     * Complexity: O(1).
+     */
+    public int getModCount() {
+        return this.modCount;
     }
 
-    public T get(int index) {
-        if (index < 0 || index >= count) {
-            throw new Exception("ArrayList index out of bounds: " + index);
-        }
-        return items[index];
+    /**
+     * Appends the specified element to the end of this list. Returns true.
+     * Complexity: O(1) amortized.
+     */
+    public boolean add(E elem) {
+        this.ensureCapacity(this.count + 1);
+        this.items[this.count] = elem;
+        this.count = this.count + 1;
+        this.modCount = this.modCount + 1;
+        return true;
     }
 
-    public void set(int index, T item) {
-        if (index < 0 || index >= count) {
-            throw new Exception("ArrayList index out of bounds: " + index);
+    /**
+     * Inserts the specified element at the specified position in this list.
+     * Throws IndexOutOfBoundsException if index < 0 || index > size().
+     * Complexity: O(n).
+     */
+    public void add(int index, E elem) {
+        if (index < 0 || index > this.count) {
+            throw new IndexOutOfBoundsException(
+                "ArrayList index out of bounds: index=" + index + ", size=" + this.count);
         }
-        items[index] = item;
+        this.ensureCapacity(this.count + 1);
+        for (int i = this.count; i > index; i--) {
+            this.items[i] = this.items[i - 1];
+        }
+        this.items[index] = elem;
+        this.count = this.count + 1;
+        this.modCount = this.modCount + 1;
     }
 
-    public T removeAt(int index) {
-        if (index < 0 || index >= count) {
-            throw new Exception("ArrayList index out of bounds: " + index);
+    /**
+     * Returns the element at the specified position in this list.
+     * Throws IndexOutOfBoundsException if index < 0 || index >= size().
+     * Complexity: O(1).
+     */
+    public E get(int index) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException(
+                "ArrayList index out of bounds: index=" + index + ", size=" + this.count);
         }
-        T val = items[index];
-        for (int i = index; i < count - 1; i++) {
-            items[i] = items[i + 1];
+        return this.items[index];
+    }
+
+    /**
+     * Replaces the element at the specified position in this list.
+     * Returns the element previously at the specified position.
+     * Throws IndexOutOfBoundsException if index < 0 || index >= size().
+     * Complexity: O(1).
+     */
+    public E set(int index, E elem) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException(
+                "ArrayList index out of bounds: index=" + index + ", size=" + this.count);
         }
-        count--;
-        items[count] = default(T);
+        E old = this.items[index];
+        this.items[index] = elem;
+        return old;
+    }
+
+    /**
+     * Removes the element at the specified position in this list.
+     * Clears the vacated slot with default(E) for GC.
+     * Throws IndexOutOfBoundsException if index < 0 || index >= size().
+     * Complexity: O(n).
+     */
+    public E removeAt(int index) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException(
+                "ArrayList index out of bounds: index=" + index + ", size=" + this.count);
+        }
+        E val = this.items[index];
+        for (int i = index; i < this.count - 1; i++) {
+            this.items[i] = this.items[i + 1];
+        }
+        this.count = this.count - 1;
+        this.items[this.count] = default(E);
+        this.modCount = this.modCount + 1;
         return val;
     }
 
+    /**
+     * Removes the first occurrence of the specified element, if present.
+     * Returns true if the list contained the specified element.
+     * Complexity: O(n).
+     */
+    public boolean remove(E elem) {
+        int idx = this.indexOf(elem);
+        if (idx < 0) {
+            return false;
+        }
+        this.removeAt(idx);
+        return true;
+    }
+
+    /**
+     * Returns the index of the first occurrence of elem, or -1 if absent.
+     * Complexity: O(n).
+     */
+    public int indexOf(E elem) {
+        for (int i = 0; i < this.count; i++) {
+            if (this.elemsEqual(this.items[i], elem)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Returns the index of the last occurrence of elem, or -1 if absent.
+     * Complexity: O(n).
+     */
+    public int lastIndexOf(E elem) {
+        for (int i = this.count - 1; i >= 0; i--) {
+            if (this.elemsEqual(this.items[i], elem)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Returns true if this list contains the specified element.
+     * Complexity: O(n).
+     */
+    public boolean contains(E elem) {
+        return this.indexOf(elem) >= 0;
+    }
+
+    /**
+     * Removes all elements from this list and clears references for GC.
+     * Complexity: O(n).
+     */
     public void clear() {
-        items = new T[8];
-        count = 0;
+        for (int i = 0; i < this.count; i++) {
+            this.items[i] = default(E);
+        }
+        this.count = 0;
+        this.modCount = this.modCount + 1;
+    }
+
+    /**
+     * Returns an array containing all of the elements in this list in order.
+     * Complexity: O(n).
+     */
+    public E[] toArray() {
+        E[] out = new E[this.count];
+        for (int i = 0; i < this.count; i++) {
+            out[i] = this.items[i];
+        }
+        return out;
+    }
+
+    /**
+     * Returns a fail-fast iterator over the elements in this list in order.
+     * Complexity: O(1).
+     */
+    public Iterator<E> iterator() {
+        return new ArrayListIterator<E>(this);
+    }
+
+    /**
+     * Sorts this list in place using a stable bottom-up/top-down merge sort
+     * according to the order induced by the specified Comparator<E>.
+     * Throws NullPointerException if cmp is null.
+     * Complexity: O(n log n) time, O(n) auxiliary space.
+     */
+    public void sort(Comparator<E> cmp) {
+        if (cmp == null) {
+            throw new NullPointerException("ArrayList.sort: comparator is null");
+        }
+        if (this.count > 1) {
+            E[] aux = new E[this.count];
+            this.mergeSort(0, this.count - 1, aux, cmp);
+        }
+        this.modCount = this.modCount + 1;
+    }
+
+    private void mergeSort(int lo, int hi, E[] aux, Comparator<E> cmp) {
+        if (lo >= hi) {
+            return;
+        }
+        int mid = lo + (hi - lo) / 2;
+        this.mergeSort(lo, mid, aux, cmp);
+        this.mergeSort(mid + 1, hi, aux, cmp);
+        if (cmp.compare(this.items[mid], this.items[mid + 1]) <= 0) {
+            return;
+        }
+        for (int k = lo; k <= hi; k++) {
+            aux[k] = this.items[k];
+        }
+        int i = lo;
+        int j = mid + 1;
+        for (int k = lo; k <= hi; k++) {
+            if (i > mid) {
+                this.items[k] = aux[j];
+                j = j + 1;
+            } else if (j > hi) {
+                this.items[k] = aux[i];
+                i = i + 1;
+            } else if (cmp.compare(aux[i], aux[j]) <= 0) {
+                /* <= preserves stability */
+                this.items[k] = aux[i];
+                i = i + 1;
+            } else {
+                this.items[k] = aux[j];
+                j = j + 1;
+            }
+        }
+    }
+
+    /**
+     * Compares this list with another ArrayList<E> for element-wise equality.
+     * Complexity: O(n).
+     */
+    public boolean equals(ArrayList<E> other) {
+        if (other == null) {
+            return false;
+        }
+        if (this == other) {
+            return true;
+        }
+        if (this.count != other.count) {
+            return false;
+        }
+        for (int i = 0; i < this.count; i++) {
+            if (!this.elemsEqual(this.items[i], other.items[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Returns a hash code based on the elements of this list (using Hasher<E> if present).
+     * Complexity: O(n).
+     */
+    public int hashCode() {
+        int h = 1;
+        for (int i = 0; i < this.count; i++) {
+            int eh = 0;
+            if (this.eq != null) {
+                eh = this.eq.hash(this.items[i]);
+            }
+            h = 31 * h + eh;
+        }
+        return h;
+    }
+
+    /**
+     * Returns a string representation of this list, e.g. "[1, 2, 3]".
+     * Complexity: O(n).
+     */
+    public String toString() {
+        ByteBuffer buf = new ByteBuffer(this.count * 4 + 2);
+        buf.appendByte('[');
+        for (int i = 0; i < this.count; i++) {
+            if (i > 0) {
+                buf.appendString(", ");
+            }
+            buf.appendString("" + this.items[i]);
+        }
+        buf.appendByte(']');
+        return buf.toString();
+    }
+}
+
+/**
+ * Fail-fast iterator for ArrayList<E>.
+ * (Top-level class because Moka does not support nested classes.)
+ */
+public class ArrayListIterator<E> implements Iterator<E> {
+    private ArrayList<E> list;
+    private int cursor;
+    private int lastRet;
+    private int expectedModCount;
+
+    public ArrayListIterator(ArrayList<E> list) {
+        this.list = list;
+        this.cursor = 0;
+        this.lastRet = -1;
+        this.expectedModCount = list.getModCount();
+    }
+
+    private void checkForComodification() {
+        if (this.list.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException(
+                "ArrayList modified during iteration");
+        }
+    }
+
+    /**
+     * Complexity: O(1).
+     */
+    public boolean hasNext() {
+        this.checkForComodification();
+        return this.cursor < this.list.size();
+    }
+
+    /**
+     * Complexity: O(1).
+     */
+    public E next() {
+        this.checkForComodification();
+        if (this.cursor >= this.list.size()) {
+            throw new NoSuchElementException("ArrayListIterator: no more elements");
+        }
+        int i = this.cursor;
+        this.cursor = i + 1;
+        this.lastRet = i;
+        return this.list.get(i);
+    }
+
+    /**
+     * Complexity: O(n).
+     */
+    public void remove() {
+        if (this.lastRet < 0) {
+            throw new IllegalStateException(
+                "ArrayListIterator.remove: next() not called or already removed");
+        }
+        this.checkForComodification();
+        this.list.removeAt(this.lastRet);
+        this.cursor = this.lastRet;
+        this.lastRet = -1;
+        this.expectedModCount = this.list.getModCount();
     }
 }

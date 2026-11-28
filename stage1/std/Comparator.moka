@@ -1,0 +1,163 @@
+import std/Comparable;
+import std/Exceptions;
+
+/**
+ * Comparison function imposing a total ordering on a collection of elements of type T.
+ *
+ * Contract (matching java.util.Comparator):
+ * - Returns a negative integer, zero, or a positive integer as the first argument
+ *   is less than, equal to, or greater than the second.
+ * - Antisymmetry, transitivity, and congruence as in Comparable.
+ */
+public interface Comparator<T> {
+    int compare(T a, T b);
+}
+
+/**
+ * Comparator that delegates to Comparable<T>.compareTo.
+ * Only instantiate for reference types T that implement Comparable<T>.
+ * Throws NullPointerException if either argument is null.
+ */
+public class NaturalOrder<T> implements Comparator<T> {
+    public int compare(T a, T b) {
+        if (a == null || b == null) {
+            throw new NullPointerException("NaturalOrder.compare: null argument");
+        }
+        Comparable<T> ca = (Comparable<T>) a;
+        return ca.compareTo(b);
+    }
+}
+
+/**
+ * Comparator that reverses the ordering of a given base Comparator<T>.
+ * Note: Moka does not support lambdas or default interface methods, so
+ * ReverseOrder wraps an explicit base Comparator<T> (which also works for primitives).
+ */
+public class ReverseOrder<T> implements Comparator<T> {
+    private Comparator<T> base;
+
+    public ReverseOrder(Comparator<T> base) {
+        if (base == null) {
+            throw new NullPointerException("ReverseOrder: base comparator is null");
+        }
+        this.base = base;
+    }
+
+    public int compare(T a, T b) {
+        return this.base.compare(b, a);
+    }
+}
+
+/**
+ * Native unboxed comparator for primitive int.
+ */
+public class IntComparator implements Comparator<int> {
+    public int compare(int a, int b) {
+        if (a < b) {
+            return -1;
+        }
+        if (a > b) {
+            return 1;
+        }
+        return 0;
+    }
+}
+
+/**
+ * Native unboxed comparator for primitive long.
+ */
+public class LongComparator implements Comparator<long> {
+    public int compare(long a, long b) {
+        if (a < b) {
+            return -1;
+        }
+        if (a > b) {
+            return 1;
+        }
+        return 0;
+    }
+}
+
+/**
+ * Native unboxed comparator for primitive double.
+ */
+public class DoubleComparator implements Comparator<double> {
+    public int compare(double a, double b) {
+        if (a < b) {
+            return -1;
+        }
+        if (a > b) {
+            return 1;
+        }
+        return 0;
+    }
+}
+
+/**
+ * Native unboxed comparator for primitive float.
+ */
+public class FloatComparator implements Comparator<float> {
+    public int compare(float a, float b) {
+        if (a < b) {
+            return -1;
+        }
+        if (a > b) {
+            return 1;
+        }
+        return 0;
+    }
+}
+
+/**
+ * Native unboxed comparator for primitive char.
+ */
+public class CharComparator implements Comparator<char> {
+    public int compare(char a, char b) {
+        if (a < b) {
+            return -1;
+        }
+        if (a > b) {
+            return 1;
+        }
+        return 0;
+    }
+}
+
+/**
+ * Native unboxed comparator for primitive boolean (false < true).
+ */
+public class BooleanComparator implements Comparator<boolean> {
+    public int compare(boolean a, boolean b) {
+        if (!a && b) {
+            return -1;
+        }
+        if (a && !b) {
+            return 1;
+        }
+        return 0;
+    }
+}
+
+/**
+ * Lexicographical comparator for String.
+ */
+public class StringComparator implements Comparator<String> {
+    public int compare(String a, String b) {
+        if (a == null || b == null) {
+            throw new NullPointerException("StringComparator.compare: null argument");
+        }
+        return a.compareTo(b);
+    }
+}
+
+/**
+ * Case-insensitive (ASCII) lexicographical comparator for String.
+ */
+public class StringIgnoreCaseComparator implements Comparator<String> {
+    public int compare(String a, String b) {
+        if (a == null || b == null) {
+            throw new NullPointerException("StringIgnoreCaseComparator.compare: null argument");
+        }
+        return a.compareToIgnoreCase(b);
+    }
+}

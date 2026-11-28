@@ -1,0 +1,456 @@
+import std/datastructures/Collection;
+import std/datastructures/Deque;
+import std/datastructures/Hasher;
+import std/datastructures/Iterator;
+import std/datastructures/Queue;
+
+/**
+ * Resizable-array implementation of the Deque<E> (and Queue<E>) interface.
+ * Backed by a circular buffer whose capacity is always a power of two,
+ * using bitmasking (& (items.length - 1)) for O(1) wrap-around indexing.
+ *
+ * - Null policy: null elements are permitted for reference types (count is tracked
+ *   explicitly so default(E) / 0 / null is never confused with empty slots).
+ * - Thread safety: NOT thread-safe.
+ * - GC: vacated slots are cleared with default(E).
+ * - Fail-fast: forward and descending iterators throw ConcurrentModificationException.
+ */
+public class ArrayDeque<E> implements Deque<E> {
+    private E[] items;
+    private int head;
+    private int tail;
+    private int count;
+    private int modCount;
+    private Hasher<E> eq;
+
+    /**
+     * Constructs an empty deque with an initial capacity of 16.
+     * Complexity: O(1).
+     */
+    public ArrayDeque() {
+        this.items = new E[16];
+        this.head = 0;
+        this.tail = 0;
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = null;
+    }
+
+    /**
+     * Constructs an empty deque with capacity rounded up to a power of 2 (min 8).
+     * Throws IllegalArgumentException if minCapacity < 0.
+     * Complexity: O(cap).
+     */
+    public ArrayDeque(int minCapacity) {
+        if (minCapacity < 0) {
+            throw new IllegalArgumentException(
+                "ArrayDeque negative capacity: " + minCapacity);
+        }
+        int cap = ArrayDeque.nextPow2(minCapacity);
+        this.items = new E[cap];
+        this.head = 0;
+        this.tail = 0;
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = null;
+    }
+
+    /**
+     * Constructs an empty deque with a custom Hasher<E> for contains/remove.
+     * Complexity: O(1).
+     */
+    public ArrayDeque(Hasher<E> eq) {
+        this.items = new E[16];
+        this.head = 0;
+        this.tail = 0;
+        this.count = 0;
+        this.modCount = 0;
+        this.eq = eq;
+    }
+
+    private static int nextPow2(int n) {
+        int cap = 8;
+        while (cap < n) {
+            cap = cap * 2;
+        }
+        return cap;
+    }
+
+    private boolean elemsEqual(E a, E b) {
+        if (this.eq != null) {
+            return this.eq.equals(a, b);
+        }
+        return a == b;
+    }
+
+    private void doubleCapacity() {
+        int oldCap = this.items.length;
+        int newCap = oldCap * 2;
+        E[] next = new E[newCap];
+        int mask = oldCap - 1;
+        for (int i = 0; i < this.count; i++) {
+            next[i] = this.items[(this.head + i) & mask];
+        }
+        this.items = next;
+        this.head = 0;
+        this.tail = this.count;
+    }
+
+    /** Returns internal modification counter for iterators. Complexity: O(1). */
+    public int getModCount() {
+        return this.modCount;
+    }
+
+    /** Returns element at logical offset i from head (0 <= i < size()). Complexity: O(1). */
+    public E getAtOffset(int i) {
+        int mask = this.items.length - 1;
+        return this.items[(this.head + i) & mask];
+    }
+
+    /** Removes element at logical offset i from head (0 <= i < size()). Complexity: O(n). */
+    public void removeAtOffset(int offset) {
+        int mask = this.items.length - 1;
+        if (offset == 0) {
+            this.pollFirst();
+            return;
+        }
+        if (offset == this.count - 1) {
+            this.pollLast();
+            return;
+        }
+        for (int i = offset; i < this.count - 1; i++) {
+            int dst = (this.head + i) & mask;
+            int src = (this.head + i + 1) & mask;
+            this.items[dst] = this.items[src];
+        }
+        this.tail = (this.tail - 1) & mask;
+        this.items[this.tail] = default(E);
+        this.count = this.count - 1;
+        this.modCount = this.modCount + 1;
+    }
+
+    /** Complexity: O(1). */
+    public int size() {
+        return this.count;
+    }
+
+    /** Complexity: O(1). */
+    public boolean isEmpty() {
+        return this.count == 0;
+    }
+
+    /** Complexity: O(1) amortized. */
+    public void addFirst(E elem) {
+        if (this.count == this.items.length) {
+            this.doubleCapacity();
+        }
+        int mask = this.items.length - 1;
+        this.head = (this.head - 1) & mask;
+        this.items[this.head] = elem;
+        this.count = this.count + 1;
+        this.modCount = this.modCount + 1;
+    }
+
+    /** Complexity: O(1) amortized. */
+    public void addLast(E elem) {
+        if (this.count == this.items.length) {
+            this.doubleCapacity();
+        }
+        int mask = this.items.length - 1;
+        this.items[this.tail] = elem;
+        this.tail = (this.tail + 1) & mask;
+        this.count = this.count + 1;
+        this.modCount = this.modCount + 1;
+    }
+
+    /** Complexity: O(1) amortized. */
+    public boolean offerFirst(E elem) {
+        this.addFirst(elem);
+        return true;
+    }
+
+    /** Complexity: O(1) amortized. */
+    public boolean offerLast(E elem) {
+        this.addLast(elem);
+        return true;
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E removeFirst() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("ArrayDeque is empty");
+        }
+        return this.pollFirst();
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E removeLast() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("ArrayDeque is empty");
+        }
+        return this.pollLast();
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E pollFirst() {
+        if (this.count == 0) {
+            return default(E);
+        }
+        E val = this.items[this.head];
+        this.items[this.head] = default(E);
+        this.head = (this.head + 1) & (this.items.length - 1);
+        this.count = this.count - 1;
+        this.modCount = this.modCount + 1;
+        return val;
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E pollLast() {
+        if (this.count == 0) {
+            return default(E);
+        }
+        this.tail = (this.tail - 1) & (this.items.length - 1);
+        E val = this.items[this.tail];
+        this.items[this.tail] = default(E);
+        this.count = this.count - 1;
+        this.modCount = this.modCount + 1;
+        return val;
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E getFirst() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("ArrayDeque is empty");
+        }
+        return this.items[this.head];
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E getLast() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("ArrayDeque is empty");
+        }
+        return this.items[(this.tail - 1) & (this.items.length - 1)];
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E peekFirst() {
+        if (this.count == 0) {
+            return default(E);
+        }
+        return this.items[this.head];
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E peekLast() {
+        if (this.count == 0) {
+            return default(E);
+        }
+        return this.items[(this.tail - 1) & (this.items.length - 1)];
+    }
+
+    /** Queue-equivalent of addLast. Complexity: O(1) amortized. */
+    public boolean add(E elem) {
+        this.addLast(elem);
+        return true;
+    }
+
+    /** Queue-equivalent of offerLast. Complexity: O(1) amortized. */
+    public boolean offer(E elem) {
+        this.addLast(elem);
+        return true;
+    }
+
+    /** Queue-equivalent of removeFirst. Complexity: O(1). */
+    public E remove() {
+        return this.removeFirst();
+    }
+
+    /** Queue-equivalent of pollFirst. Complexity: O(1). */
+    public E poll() {
+        return this.pollFirst();
+    }
+
+    /** Queue-equivalent of getFirst. Complexity: O(1). */
+    public E element() {
+        return this.getFirst();
+    }
+
+    /** Queue-equivalent of peekFirst. Complexity: O(1). */
+    public E peek() {
+        return this.peekFirst();
+    }
+
+    /** Stack-equivalent of addFirst. Complexity: O(1) amortized. */
+    public void push(E elem) {
+        this.addFirst(elem);
+    }
+
+    /** Stack-equivalent of removeFirst. Complexity: O(1). */
+    public E pop() {
+        return this.removeFirst();
+    }
+
+    /** Complexity: O(n). */
+    public boolean contains(E elem) {
+        int mask = this.items.length - 1;
+        for (int i = 0; i < this.count; i++) {
+            if (this.elemsEqual(this.items[(this.head + i) & mask], elem)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Removes the first occurrence of elem (head to tail). Complexity: O(n). */
+    public boolean remove(E elem) {
+        int mask = this.items.length - 1;
+        for (int i = 0; i < this.count; i++) {
+            if (this.elemsEqual(this.items[(this.head + i) & mask], elem)) {
+                this.removeAtOffset(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Clears all elements and resets references for GC. Complexity: O(n). */
+    public void clear() {
+        int mask = this.items.length - 1;
+        for (int i = 0; i < this.count; i++) {
+            this.items[(this.head + i) & mask] = default(E);
+        }
+        this.head = 0;
+        this.tail = 0;
+        this.count = 0;
+        this.modCount = this.modCount + 1;
+    }
+
+    /** Complexity: O(n). */
+    public E[] toArray() {
+        E[] out = new E[this.count];
+        int mask = this.items.length - 1;
+        for (int i = 0; i < this.count; i++) {
+            out[i] = this.items[(this.head + i) & mask];
+        }
+        return out;
+    }
+
+    /** Complexity: O(1). */
+    public Iterator<E> iterator() {
+        return new ArrayDequeIterator<E>(this);
+    }
+
+    /** Complexity: O(1). */
+    public Iterator<E> descendingIterator() {
+        return new ArrayDequeDescendingIterator<E>(this);
+    }
+
+    /** Complexity: O(n). */
+    public String toString() {
+        ByteBuffer buf = new ByteBuffer(this.count * 4 + 2);
+        buf.appendByte('[');
+        int mask = this.items.length - 1;
+        for (int i = 0; i < this.count; i++) {
+            if (i > 0) {
+                buf.appendString(", ");
+            }
+            buf.appendString("" + this.items[(this.head + i) & mask]);
+        }
+        buf.appendByte(']');
+        return buf.toString();
+    }
+}
+
+public class ArrayDequeIterator<E> implements Iterator<E> {
+    private ArrayDeque<E> deque;
+    private int cursor;
+    private int lastRet;
+    private int expectedModCount;
+
+    public ArrayDequeIterator(ArrayDeque<E> deque) {
+        this.deque = deque;
+        this.cursor = 0;
+        this.lastRet = -1;
+        this.expectedModCount = deque.getModCount();
+    }
+
+    private void checkComod() {
+        if (this.deque.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException("ArrayDeque modified during iteration");
+        }
+    }
+
+    public boolean hasNext() {
+        this.checkComod();
+        return this.cursor < this.deque.size();
+    }
+
+    public E next() {
+        this.checkComod();
+        if (this.cursor >= this.deque.size()) {
+            throw new NoSuchElementException("ArrayDequeIterator: no more elements");
+        }
+        E val = this.deque.getAtOffset(this.cursor);
+        this.lastRet = this.cursor;
+        this.cursor = this.cursor + 1;
+        return val;
+    }
+
+    public void remove() {
+        if (this.lastRet < 0) {
+            throw new IllegalStateException("ArrayDequeIterator.remove: invalid state");
+        }
+        this.checkComod();
+        this.deque.removeAtOffset(this.lastRet);
+        this.cursor = this.lastRet;
+        this.lastRet = -1;
+        this.expectedModCount = this.deque.getModCount();
+    }
+}
+
+public class ArrayDequeDescendingIterator<E> implements Iterator<E> {
+    private ArrayDeque<E> deque;
+    private int cursor;
+    private int lastRet;
+    private int expectedModCount;
+
+    public ArrayDequeDescendingIterator(ArrayDeque<E> deque) {
+        this.deque = deque;
+        this.cursor = deque.size() - 1;
+        this.lastRet = -1;
+        this.expectedModCount = deque.getModCount();
+    }
+
+    private void checkComod() {
+        if (this.deque.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException("ArrayDeque modified during iteration");
+        }
+    }
+
+    public boolean hasNext() {
+        this.checkComod();
+        return this.cursor >= 0;
+    }
+
+    public E next() {
+        this.checkComod();
+        if (this.cursor < 0) {
+            throw new NoSuchElementException("ArrayDequeDescendingIterator: no more elements");
+        }
+        E val = this.deque.getAtOffset(this.cursor);
+        this.lastRet = this.cursor;
+        this.cursor = this.cursor - 1;
+        return val;
+    }
+
+    public void remove() {
+        if (this.lastRet < 0) {
+            throw new IllegalStateException("ArrayDequeDescendingIterator.remove: invalid state");
+        }
+        this.checkComod();
+        this.deque.removeAtOffset(this.lastRet);
+        this.lastRet = -1;
+        this.expectedModCount = this.deque.getModCount();
+    }
+}

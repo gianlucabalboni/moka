@@ -2,13 +2,13 @@ CC = cc
 CFLAGS = -std=c11 -O2 -Wall -Wextra -Werror -pthread -g
 STAGE0 = ../stage0/build/mokac
 RUNTIME_DIR = runtime
-STD_FILES = std/String.moka std/Console.moka std/ByteBuffer.moka std/Io.moka std/Exception.moka std/Runnable.moka std/Thread.moka std/Mutex.moka
+STD_FILES = std/Comparable.moka std/Comparator.moka std/Exceptions.moka std/String.moka std/Console.moka std/ByteBuffer.moka std/Io.moka std/Exception.moka std/Runnable.moka std/Thread.moka std/Mutex.moka
 BOOT_STD_FILES = std_boot/String.moka std_boot/Console.moka std_boot/ByteBuffer.moka std_boot/Io.moka std_boot/Exception.moka
 SRC_FILES = src/Token.moka src/Lexer.moka src/Ast.moka src/Parser.moka src/Sema.moka src/Codegen.moka src/Main.moka
 
-.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-phase-b test-phase-c test-final test-phase-d test-phase-e test-phase-f test-bootstrap install uninstall windows clean
+.PHONY: all stage0 mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-phase-b test-phase-c test-final test-phase-d test-phase-e test-phase-f test-phase0 test-ds-interfaces test-arraylist test-arraydeque test-hashmap test-priorityqueue test-linkedlist test-treemap test-bootstrap install uninstall windows clean
 
-all: mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-phase-b test-phase-c test-final test-phase-d test-phase-e test-phase-f test-bootstrap
+all: mokac test-std test-lexer test-e2e test-gc test-features test-inheritance test-interfaces test-console-input test-import test-static-fields test-phase-a test-phase-b test-phase-c test-final test-phase-d test-phase-e test-phase-f test-phase0 test-ds-interfaces test-arraylist test-arraydeque test-hashmap test-priorityqueue test-linkedlist test-treemap test-bootstrap
 
 stage0:
 	$(MAKE) -C ../stage0 mokac
@@ -91,6 +91,38 @@ test-phase-e: build/mokac $(STD_FILES) tests/test_phase_e.moka
 test-phase-f: build/mokac $(STD_FILES) tests/test_phase_f.moka
 	./build/mokac tests/test_phase_f.moka -o build/test_phase_f
 	./build/test_phase_f
+
+test-phase0: build/mokac $(STD_FILES) tests/test_phase0.moka
+	./build/mokac tests/test_phase0.moka -o build/test_phase0
+	./build/test_phase0
+
+test-ds-interfaces: build/mokac $(STD_FILES) tests/test_ds_interfaces.moka
+	./build/mokac tests/test_ds_interfaces.moka -o build/test_ds_interfaces
+	./build/test_ds_interfaces
+
+test-arraylist: build/mokac $(STD_FILES) tests/test_arraylist.moka
+	./build/mokac tests/test_arraylist.moka -o build/test_arraylist
+	./build/test_arraylist
+
+test-arraydeque: build/mokac $(STD_FILES) tests/test_arraydeque.moka
+	./build/mokac tests/test_arraydeque.moka -o build/test_arraydeque
+	./build/test_arraydeque
+
+test-hashmap: build/mokac $(STD_FILES) tests/test_hashmap.moka
+	./build/mokac tests/test_hashmap.moka -o build/test_hashmap
+	./build/test_hashmap
+
+test-priorityqueue: build/mokac $(STD_FILES) tests/test_priorityqueue.moka
+	./build/mokac tests/test_priorityqueue.moka -o build/test_priorityqueue
+	./build/test_priorityqueue
+
+test-linkedlist: build/mokac $(STD_FILES) tests/test_linkedlist.moka
+	./build/mokac tests/test_linkedlist.moka -o build/test_linkedlist
+	./build/test_linkedlist
+
+test-treemap: build/mokac $(STD_FILES) tests/test_treemap.moka
+	./build/mokac tests/test_treemap.moka -o build/test_treemap
+	./build/test_treemap
 
 test-bootstrap: build/mokac $(BOOT_STD_FILES) $(SRC_FILES)
 	./build/mokac --emit-c $(BOOT_STD_FILES) $(SRC_FILES) -o build/stage1_gen1.c

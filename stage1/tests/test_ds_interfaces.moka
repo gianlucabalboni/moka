@@ -1,0 +1,55 @@
+import std/datastructures/Iterator;
+import std/datastructures/Iterable;
+import std/datastructures/Collection;
+import std/datastructures/List;
+import std/datastructures/Queue;
+import std/datastructures/Deque;
+import std/datastructures/Set;
+import std/datastructures/MapEntry;
+import std/datastructures/Map;
+import std/datastructures/Hasher;
+
+class DummyIntIter implements Iterator<int> {
+    public boolean hasNext() { return false; }
+    public int next() { throw new NoSuchElementException("empty"); }
+    public void remove() { throw new IllegalStateException("empty"); }
+}
+
+class DummyList implements List<int> {
+    private int count;
+    public DummyList() { this.count = 0; }
+    public int size() { return this.count; }
+    public boolean isEmpty() { return this.count == 0; }
+    public boolean contains(int elem) { return false; }
+    public boolean add(int elem) { this.count = this.count + 1; return true; }
+    public void add(int index, int elem) { this.count = this.count + 1; }
+    public int get(int index) { return 0; }
+    public int set(int index, int elem) { return 0; }
+    public boolean remove(int elem) { return false; }
+    public int removeAt(int index) { return 0; }
+    public int indexOf(int elem) { return -1; }
+    public int lastIndexOf(int elem) { return -1; }
+    public void clear() { this.count = 0; }
+    public Iterator<int> iterator() { return new DummyIntIter(); }
+    public int[] toArray() { return new int[0]; }
+    public String toString() { return "[]"; }
+}
+
+class Main {
+    public static int main() {
+        List<int> list = new DummyList();
+        list.add(10);
+        Collection<int> col = list;
+        Iterable<int> itbl = col;
+        if (col.size() != 1 || itbl.iterator().hasNext()) {
+            Console.eprintln("Interface inheritance dispatch failed");
+            return 1;
+        }
+        if (!(list instanceof Collection<int>) || !(list instanceof Iterable<int>)) {
+            Console.eprintln("Interface instanceof failed");
+            return 1;
+        }
+        Console.println("All data structure interfaces (with inheritance) verified!");
+        return 0;
+    }
+}

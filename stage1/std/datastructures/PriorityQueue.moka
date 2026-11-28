@@ -1,0 +1,295 @@
+import std/Comparator;
+import std/datastructures/Collection;
+import std/datastructures/Iterator;
+import std/datastructures/Queue;
+
+/**
+ * Unbounded priority queue based on a binary min-heap.
+ * Elements are ordered according to the Comparator<E> provided at construction
+ * (use NaturalOrder<E> for Comparable<E> objects, or IntComparator/etc. for primitives).
+ *
+ * - Null policy: depends on Comparator<E> (NaturalOrder/StringComparator reject null).
+ * - Thread safety: NOT thread-safe.
+ * - GC: vacated slots are cleared with default(E).
+ * - Fail-fast: iterator throws ConcurrentModificationException.
+ */
+public class PriorityQueue<E> implements Queue<E> {
+    private E[] heap;
+    private int count;
+    private int modCount;
+    private Comparator<E> cmp;
+
+    /**
+     * Constructs a PriorityQueue with initial capacity 11 and the given Comparator<E>.
+     * Throws NullPointerException if cmp is null.
+     * Complexity: O(1).
+     */
+    public PriorityQueue(Comparator<E> cmp) {
+        if (cmp == null) {
+            throw new NullPointerException("PriorityQueue: comparator is null");
+        }
+        this.heap = new E[11];
+        this.count = 0;
+        this.modCount = 0;
+        this.cmp = cmp;
+    }
+
+    /**
+     * Constructs a PriorityQueue with the specified initial capacity and Comparator<E>.
+     * Throws IllegalArgumentException if initialCapacity < 1.
+     * Throws NullPointerException if cmp is null.
+     * Complexity: O(initialCapacity).
+     */
+    public PriorityQueue(int initialCapacity, Comparator<E> cmp) {
+        if (initialCapacity < 1) {
+            throw new IllegalArgumentException(
+                "PriorityQueue invalid initial capacity: " + initialCapacity);
+        }
+        if (cmp == null) {
+            throw new NullPointerException("PriorityQueue: comparator is null");
+        }
+        this.heap = new E[initialCapacity];
+        this.count = 0;
+        this.modCount = 0;
+        this.cmp = cmp;
+    }
+
+    private void grow() {
+        int newCap = this.heap.length * 2;
+        E[] next = new E[newCap];
+        for (int i = 0; i < this.count; i++) {
+            next[i] = this.heap[i];
+        }
+        this.heap = next;
+    }
+
+    private void siftUp(int idx, E val) {
+        while (idx > 0) {
+            int parent = (idx - 1) / 2;
+            E p = this.heap[parent];
+            if (this.cmp.compare(val, p) >= 0) {
+                break;
+            }
+            this.heap[idx] = p;
+            idx = parent;
+        }
+        this.heap[idx] = val;
+    }
+
+    private void siftDown(int idx, E val) {
+        int half = this.count / 2;
+        while (idx < half) {
+            int child = idx * 2 + 1;
+            E c = this.heap[child];
+            int right = child + 1;
+            if (right < this.count && this.cmp.compare(this.heap[right], c) < 0) {
+                child = right;
+                c = this.heap[right];
+            }
+            if (this.cmp.compare(val, c) <= 0) {
+                break;
+            }
+            this.heap[idx] = c;
+            idx = child;
+        }
+        this.heap[idx] = val;
+    }
+
+    /** Internal helpers for PriorityQueueIterator. */
+    public int getModCount() { return this.modCount; }
+    public E getAtRaw(int i) { return this.heap[i]; }
+
+    /** Removes the element at heap index i. Complexity: O(log n). */
+    public void removeAtIndex(int i) {
+        this.modCount = this.modCount + 1;
+        int s = this.count - 1;
+        this.count = s;
+        if (s == i) {
+            this.heap[i] = default(E);
+        } else {
+            E moved = this.heap[s];
+            this.heap[s] = default(E);
+            this.siftDown(i, moved);
+            if (this.heap[i] == moved) {
+                this.siftUp(i, moved);
+            }
+        }
+    }
+
+    /** Complexity: O(1). */
+    public int size() {
+        return this.count;
+    }
+
+    /** Complexity: O(1). */
+    public boolean isEmpty() {
+        return this.count == 0;
+    }
+
+    /** Complexity: O(log n) amortized. */
+    public boolean offer(E elem) {
+        this.modCount = this.modCount + 1;
+        int i = this.count;
+        if (i >= this.heap.length) {
+            this.grow();
+        }
+        this.count = i + 1;
+        if (i == 0) {
+            this.heap[0] = elem;
+        } else {
+            this.siftUp(i, elem);
+        }
+        return true;
+    }
+
+    /** Complexity: O(log n) amortized. */
+    public boolean add(E elem) {
+        return this.offer(elem);
+    }
+
+    /** Complexity: O(1). Returns default(E) if empty. */
+    public E peek() {
+        if (this.count == 0) {
+            return default(E);
+        }
+        return this.heap[0];
+    }
+
+    /** Complexity: O(1). Throws NoSuchElementException if empty. */
+    public E element() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("PriorityQueue is empty");
+        }
+        return this.heap[0];
+    }
+
+    /** Complexity: O(log n). Returns default(E) if empty. */
+    public E poll() {
+        if (this.count == 0) {
+            return default(E);
+        }
+        int s = this.count - 1;
+        this.count = s;
+        this.modCount = this.modCount + 1;
+        E result = this.heap[0];
+        E x = this.heap[s];
+        this.heap[s] = default(E);
+        if (s > 0) {
+            this.siftDown(0, x);
+        }
+        return result;
+    }
+
+    /** Complexity: O(log n). Throws NoSuchElementException if empty. */
+    public E remove() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("PriorityQueue is empty");
+        }
+        return this.poll();
+    }
+
+    /** Complexity: O(n). */
+    public boolean contains(E elem) {
+        for (int i = 0; i < this.count; i++) {
+            if (this.cmp.compare(this.heap[i], elem) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Complexity: O(n). */
+    public boolean remove(E elem) {
+        for (int i = 0; i < this.count; i++) {
+            if (this.cmp.compare(this.heap[i], elem) == 0) {
+                this.removeAtIndex(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Complexity: O(n). Clears references for GC. */
+    public void clear() {
+        for (int i = 0; i < this.count; i++) {
+            this.heap[i] = default(E);
+        }
+        this.count = 0;
+        this.modCount = this.modCount + 1;
+    }
+
+    /** Complexity: O(n). */
+    public E[] toArray() {
+        E[] out = new E[this.count];
+        for (int i = 0; i < this.count; i++) {
+            out[i] = this.heap[i];
+        }
+        return out;
+    }
+
+    /** Complexity: O(1). */
+    public Iterator<E> iterator() {
+        return new PriorityQueueIterator<E>(this);
+    }
+
+    /** Complexity: O(n). */
+    public String toString() {
+        ByteBuffer buf = new ByteBuffer(this.count * 4 + 2);
+        buf.appendByte('[');
+        for (int i = 0; i < this.count; i++) {
+            if (i > 0) {
+                buf.appendString(", ");
+            }
+            buf.appendString("" + this.heap[i]);
+        }
+        buf.appendByte(']');
+        return buf.toString();
+    }
+}
+
+public class PriorityQueueIterator<E> implements Iterator<E> {
+    private PriorityQueue<E> pq;
+    private int cursor;
+    private int lastRet;
+    private int expectedModCount;
+
+    public PriorityQueueIterator(PriorityQueue<E> pq) {
+        this.pq = pq;
+        this.cursor = 0;
+        this.lastRet = -1;
+        this.expectedModCount = pq.getModCount();
+    }
+
+    private void checkComod() {
+        if (this.pq.getModCount() != this.expectedModCount) {
+            throw new ConcurrentModificationException("PriorityQueue modified during iteration");
+        }
+    }
+
+    public boolean hasNext() {
+        this.checkComod();
+        return this.cursor < this.pq.size();
+    }
+
+    public E next() {
+        this.checkComod();
+        if (this.cursor >= this.pq.size()) {
+            throw new NoSuchElementException("PriorityQueueIterator: no more elements");
+        }
+        E val = this.pq.getAtRaw(this.cursor);
+        this.lastRet = this.cursor;
+        this.cursor = this.cursor + 1;
+        return val;
+    }
+
+    public void remove() {
+        if (this.lastRet < 0) {
+            throw new IllegalStateException("PriorityQueueIterator.remove: invalid state");
+        }
+        this.checkComod();
+        this.pq.removeAtIndex(this.lastRet);
+        this.cursor = this.lastRet;
+        this.lastRet = -1;
+        this.expectedModCount = this.pq.getModCount();
+    }
+}

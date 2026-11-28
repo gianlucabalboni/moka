@@ -232,7 +232,9 @@ public class Codegen {
         } else if (k == TypeKind.BOOLEAN()) {
             this.out.appendString("false");
         } else if (this.isInterfaceType(ty)) {
-            this.out.appendString("{ NULL, NULL }");
+            this.out.appendString("((");
+            this.out.appendString(ty.resolvedClass.name);
+            this.out.appendString("){ NULL, NULL })");
         } else if (k == TypeKind.CLASS() || k == TypeKind.ARRAY() || k == TypeKind.NULL()) {
             this.out.appendString("NULL");
         }
@@ -1488,6 +1490,35 @@ public class Codegen {
             if (cls.isInterface && !cls.isGenericTemplate) {
                 this.out.appendString("typedef struct ");
                 this.out.appendString(cls.name);
+                this.out.appendString("_VTable ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable;\n");
+
+                this.out.appendString("typedef struct ");
+                this.out.appendString(cls.name);
+                this.out.appendString(" {\n");
+                this.out.appendString("    void* obj;\n");
+                this.out.appendString("    const ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_VTable* vtable;\n} ");
+                this.out.appendString(cls.name);
+                this.out.appendString(";\n");
+
+                this.out.appendString("static const RtTypeInfo ");
+                this.out.appendString(cls.name);
+                this.out.appendString("_type_info = { \"");
+                this.out.appendString(cls.name);
+                this.out.appendString("\", 0, NULL, NULL, NULL, 0, NULL, NULL };\n\n");
+            }
+            i = i + 1;
+        }
+
+        i = 0;
+        while (i < this.prog.classes.size()) {
+            ClassDecl cls = this.prog.classes.get(i);
+            if (cls.isInterface && !cls.isGenericTemplate) {
+                this.out.appendString("struct ");
+                this.out.appendString(cls.name);
                 this.out.appendString("_VTable {\n");
                 int m = 0;
                 while (m < cls.methods.size()) {
@@ -1506,25 +1537,7 @@ public class Codegen {
                     this.out.appendString(");\n");
                     m = m + 1;
                 }
-                this.out.appendString("} ");
-                this.out.appendString(cls.name);
-                this.out.appendString("_VTable;\n");
-
-                this.out.appendString("typedef struct ");
-                this.out.appendString(cls.name);
-                this.out.appendString(" {\n");
-                this.out.appendString("    void* obj;\n");
-                this.out.appendString("    const ");
-                this.out.appendString(cls.name);
-                this.out.appendString("_VTable* vtable;\n} ");
-                this.out.appendString(cls.name);
-                this.out.appendString(";\n\n");
-
-                this.out.appendString("static const RtTypeInfo ");
-                this.out.appendString(cls.name);
-                this.out.appendString("_type_info = { \"");
-                this.out.appendString(cls.name);
-                this.out.appendString("\", 0, NULL, NULL, NULL, 0, NULL, NULL };\n");
+                this.out.appendString("};\n\n");
 
                 this.out.appendString("static inline ");
                 this.out.appendString(cls.name);
@@ -1692,12 +1705,29 @@ public class Codegen {
         return null;
     }
 
+    private boolean ifaceExtends(ClassDecl iface, ClassDecl target, int depth) {
+        if (iface == target) {
+            return true;
+        }
+        if (depth > 64) {
+            return false;
+        }
+        int i = 0;
+        while (i < iface.impls.size()) {
+            if (this.ifaceExtends(iface.impls.get(i), target, depth + 1)) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
     private boolean classImplementsIface(ClassDecl cls, ClassDecl iface) {
         ClassDecl c = cls;
         while (c != null) {
             int i = 0;
             while (i < c.impls.size()) {
-                if (c.impls.get(i) == iface) {
+                if (this.ifaceExtends(c.impls.get(i), iface, 0)) {
                     return true;
                 }
                 i = i + 1;

@@ -1,0 +1,31 @@
+/**
+ * An iterator over a collection.
+ *
+ * Note: Moka does not support Java's enhanced for-each loop (for (E x : c)).
+ * Iterate using:
+ *   Iterator<E> it = c.iterator();
+ *   while (it.hasNext()) {
+ *       E item = it.next();
+ *       ...
+ *   }
+ */
+public interface Iterator<E> {
+    /** Returns true if the iteration has more elements. */
+    boolean hasNext();
+
+    /**
+     * Returns the next element in the iteration.
+     * Throws NoSuchElementException if the iteration has no more elements.
+     * Throws ConcurrentModificationException if the underlying collection was
+     * structurally modified outside this iterator.
+     */
+    E next();
+
+    /**
+     * Removes from the underlying collection the last element returned by this iterator.
+     * Throws IllegalStateException if next() has not yet been called, or remove()
+     * has already been called after the last call to next(), or if unsupported.
+     * Throws ConcurrentModificationException on concurrent modification.
+     */
+    void remove();
+}

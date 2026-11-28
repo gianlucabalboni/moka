@@ -1,8 +1,15 @@
-public class String {
+import std/Comparable;
+import std/Exceptions;
+
+public class String implements Comparable<String> {
     private byte[] data;
+    private int cachedHash;
+    private boolean hashComputed;
 
     public String(byte[] data) {
         this.data = data;
+        this.cachedHash = 0;
+        this.hashComputed = false;
     }
 
     public int length() {
@@ -73,7 +80,89 @@ public class String {
             j = j + 1;
         }
         this.data = out;
+        this.cachedHash = 0;
+        this.hashComputed = false;
         return this;
+    }
+
+    /**
+     * FNV-1a 32-bit hash code, cached after first computation.
+     */
+    public int hashCode() {
+        if (this.hashComputed) {
+            return this.cachedHash;
+        }
+        long h = 2166136261L;
+        int len = this.data.length;
+        int i = 0;
+        while (i < len) {
+            h = h ^ (long) this.data[i];
+            h = (h * 16777619L) & 4294967295L;
+            i = i + 1;
+        }
+        this.cachedHash = (int) h;
+        this.hashComputed = true;
+        return this.cachedHash;
+    }
+
+    /**
+     * Lexicographical comparison by unsigned byte value (0..255).
+     * For valid UTF-8 strings, byte order matches Unicode code point order.
+     * Throws NullPointerException if other is null.
+     */
+    public int compareTo(String other) {
+        if (other == null) {
+            throw new NullPointerException("String.compareTo: null argument");
+        }
+        int lenA = this.data.length;
+        int lenB = other.length();
+        int lim = lenA;
+        if (lenB < lim) {
+            lim = lenB;
+        }
+        int i = 0;
+        while (i < lim) {
+            int a = (int) this.data[i];
+            int b = (int) other.byteAt(i);
+            if (a != b) {
+                return a - b;
+            }
+            i = i + 1;
+        }
+        return lenA - lenB;
+    }
+
+    /**
+     * Case-insensitive lexicographical comparison (ASCII A-Z folded to a-z;
+     * non-ASCII UTF-8 bytes are compared as unsigned byte values).
+     * Throws NullPointerException if other is null.
+     */
+    public int compareToIgnoreCase(String other) {
+        if (other == null) {
+            throw new NullPointerException("String.compareToIgnoreCase: null argument");
+        }
+        int lenA = this.data.length;
+        int lenB = other.length();
+        int lim = lenA;
+        if (lenB < lim) {
+            lim = lenB;
+        }
+        int i = 0;
+        while (i < lim) {
+            int a = (int) this.data[i];
+            int b = (int) other.byteAt(i);
+            if (a >= 'A' && a <= 'Z') {
+                a = a + 32;
+            }
+            if (b >= 'A' && b <= 'Z') {
+                b = b + 32;
+            }
+            if (a != b) {
+                return a - b;
+            }
+            i = i + 1;
+        }
+        return lenA - lenB;
     }
 
     public String substring(int start, int end) {

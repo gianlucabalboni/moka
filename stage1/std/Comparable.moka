@@ -1,0 +1,18 @@
+/**
+ * Total ordering interface for objects of type T.
+ *
+ * Contract (matching java.lang.Comparable):
+ * - Returns a negative integer, zero, or a positive integer as this object
+ *   is less than, equal to, or greater than the specified object.
+ * - Antisymmetry: sgn(x.compareTo(y)) == -sgn(y.compareTo(x)).
+ * - Transitivity: (x.compareTo(y) > 0 && y.compareTo(z) > 0) => x.compareTo(z) > 0.
+ * - Congruence: x.compareTo(y) == 0 => sgn(x.compareTo(z)) == sgn(y.compareTo(z)).
+ * - Consistency with equals (strongly recommended): (x.compareTo(y) == 0) == x.equals(y).
+ *
+ * Note: Moka does not support bounded generic type parameters (<T extends Comparable<T>>).
+ * Generic collections use Comparator<T> or NaturalOrder<T> (which performs a checked
+ * cast to Comparable<T>) instead.
+ */
+public interface Comparable<T> {
+    int compareTo(T other);
+}

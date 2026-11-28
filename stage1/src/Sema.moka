@@ -215,16 +215,33 @@ public class Sema {
         return null;
     }
 
+    private boolean ifaceExtends(ClassDecl iface, ClassDecl target, int depth) {
+        if (iface == target) {
+            return true;
+        }
+        if (depth > 64) {
+            return false;
+        }
+        int i = 0;
+        while (i < iface.impls.size()) {
+            if (this.ifaceExtends(iface.impls.get(i), target, depth + 1)) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
     private boolean isSubtype(ClassDecl sub, ClassDecl sup) {
         if (sup.isInterface) {
-            if (sub == sup) {
-                return true;
+            if (sub.isInterface) {
+                return this.ifaceExtends(sub, sup, 0);
             }
             ClassDecl c = sub;
             while (c != null) {
                 int i = 0;
                 while (i < c.impls.size()) {
-                    if (c.impls.get(i) == sup) {
+                    if (this.ifaceExtends(c.impls.get(i), sup, 0)) {
                         return true;
                     }
                     i = i + 1;
@@ -473,9 +490,53 @@ public class Sema {
             if (!this.verifyInterfacesForClass(inst)) {
                 return inst;
             }
+        } else {
+            this.flattenInterfaceMethods(inst, 0);
         }
         this.pendingClasses.add(inst);
         return inst;
+    }
+
+    private boolean flattenInterfaceMethods(ClassDecl iface, int depth) {
+        if (depth > 64) {
+            this.errorAt(iface.line, iface.col,
+                "cyclic interface inheritance involving '".concat(iface.name).concat("'"));
+            return false;
+        }
+        int k = 0;
+        while (k < iface.impls.size()) {
+            ClassDecl parent = iface.impls.get(k);
+            if (!this.flattenInterfaceMethods(parent, depth + 1)) {
+                return false;
+            }
+            int m = 0;
+            while (m < parent.methods.size()) {
+                MethodDecl pm = parent.methods.get(m);
+                boolean found = false;
+                int j = 0;
+                while (j < iface.methods.size()) {
+                    MethodDecl im = iface.methods.get(j);
+                    if (im.name.equals(pm.name) && this.sameParamTypes(im, pm)) {
+                        if (!this.typesEqual(im.returnType, pm.returnType)) {
+                            this.errorAt(im.line, im.col,
+                                "method '".concat(iface.name).concat(".").concat(im.name)
+                                .concat("' has incompatible return type with superinterface '")
+                                .concat(parent.name).concat("'"));
+                            return false;
+                        }
+                        found = true;
+                        break;
+                    }
+                    j = j + 1;
+                }
+                if (!found) {
+                    iface.methods.add(pm);
+                }
+                m = m + 1;
+            }
+            k = k + 1;
+        }
+        return true;
     }
 
     private boolean resolveType(Type ty, int line, int col) {
@@ -737,6 +798,11 @@ public class Sema {
                         return false;
                     }
                     cur = cur.superClass;
+                }
+                if (cls.isInterface) {
+                    if (!this.flattenInterfaceMethods(cls, 0)) {
+                        return false;
+                    }
                 }
             }
             i = i + 1;

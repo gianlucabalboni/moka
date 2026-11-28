@@ -1206,4 +1206,14 @@ static inline RtArray* rt_exe_dir(void) {
 #endif
 }
 
+static inline int64_t rt_monotonic_ms(void) {
+#ifdef _WIN32
+    return (int64_t)GetTickCount64();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000LL + (int64_t)(ts.tv_nsec / 1000000LL);
+#endif
+}
+
 #endif /* MOKA_RUNTIME_H */

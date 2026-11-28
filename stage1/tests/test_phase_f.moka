@@ -1,10 +1,12 @@
 import std/Math;
-import std/datastructures/List;
+import std/datastructures/ArrayDeque;
 import std/datastructures/ArrayList;
-import std/datastructures/Stack;
-import std/datastructures/Queue;
+import std/datastructures/HashMap;
+import std/datastructures/Hasher;
+import std/datastructures/List;
 import std/datastructures/Map;
-import std/datastructures/StringMap;
+import std/datastructures/Queue;
+import std/datastructures/Stack;
 
 class Main {
     public static int main() {
@@ -51,7 +53,7 @@ class Main {
         boolean stackThrew = false;
         try {
             st.pop();
-        } catch (Exception e) {
+        } catch (NoSuchElementException e) {
             stackThrew = true;
         }
         if (!stackThrew) {
@@ -59,12 +61,12 @@ class Main {
             return 1;
         }
 
-        // 4. Queue<T> (circular wraparound)
-        Queue<String> q = new Queue<>();
+        // 4. Queue<T> via ArrayDeque<T> (circular wraparound)
+        Queue<String> q = new ArrayDeque<>();
         for (int i = 0; i < 12; i++) {
-            q.enqueue("item_" + i);
+            q.offer("item_" + i);
             if (i % 2 == 1) {
-                q.dequeue();
+                q.poll();
             }
         }
         if (q.size() != 6 || !q.peek().equals("item_6")) {
@@ -72,8 +74,8 @@ class Main {
             return 1;
         }
 
-        // 5. Map<K, V> and StringMap<V>
-        Map<int, String> idMap = new Map<>();
+        // 5. Map<K, V> via HashMap<K, V>
+        Map<int, String> idMap = new HashMap<>(new IntHasher());
         idMap.put(1, "one");
         idMap.put(2, "two");
         idMap.put(1, "ONE");
@@ -87,11 +89,11 @@ class Main {
             return 1;
         }
 
-        StringMap<int> scores = new StringMap<>();
+        Map<String, int> scores = new HashMap<>(new StringHasher());
         scores.put("Alice", 95);
         scores.put("Bob", 88);
         if (scores.get("Alice") != 95 || scores.get("Bob") != 88) {
-            Console.eprintln("StringMap<int> failed");
+            Console.eprintln("HashMap<String, int> failed");
             return 1;
         }
 

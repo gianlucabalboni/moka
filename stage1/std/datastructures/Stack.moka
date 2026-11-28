@@ -1,46 +1,65 @@
-public class Stack<T> {
-    private T[] items;
-    private int count;
+import std/datastructures/ArrayDeque;
+import std/datastructures/Iterator;
 
+/**
+ * LIFO stack wrapper backed by ArrayDeque<E>.
+ *
+ * - Null policy: same as ArrayDeque<E> (null allowed for reference types).
+ * - Thread safety: NOT thread-safe.
+ */
+public class Stack<E> {
+    private ArrayDeque<E> deque;
+
+    /** Complexity: O(1). */
     public Stack() {
-        items = new T[8];
-        count = 0;
+        this.deque = new ArrayDeque<E>();
     }
 
+    /** Complexity: O(1). */
     public int size() {
-        return count;
+        return this.deque.size();
     }
 
+    /** Complexity: O(1). */
     public boolean isEmpty() {
-        return count == 0;
+        return this.deque.isEmpty();
     }
 
-    public void push(T item) {
-        if (count >= items.length) {
-            T[] next = new T[items.length * 2];
-            for (int i = 0; i < count; i++) {
-                next[i] = items[i];
-            }
-            items = next;
-        }
-        items[count] = item;
-        count++;
+    /** Pushes an element onto the top of this stack. Complexity: O(1) amortized. */
+    public void push(E item) {
+        this.deque.push(item);
     }
 
-    public T pop() {
-        if (count == 0) {
-            throw new Exception("Stack underflow");
-        }
-        count--;
-        T val = items[count];
-        items[count] = default(T);
-        return val;
+    /**
+     * Removes and returns the top element of this stack.
+     * Throws NoSuchElementException if the stack is empty.
+     * Complexity: O(1).
+     */
+    public E pop() {
+        return this.deque.pop();
     }
 
-    public T peek() {
-        if (count == 0) {
-            throw new Exception("Stack is empty");
-        }
-        return items[count - 1];
+    /**
+     * Returns the top element without removing it.
+     * Throws NoSuchElementException if the stack is empty.
+     * Complexity: O(1).
+     */
+    public E peek() {
+        return this.deque.getFirst();
+    }
+
+    /** Removes all elements from this stack. Complexity: O(n). */
+    public void clear() {
+        this.deque.clear();
+    }
+
+    /** Returns an iterator from top to bottom. Complexity: O(1). */
+    public Iterator<E> iterator() {
+        return this.deque.iterator();
+    }
+
+    /** Returns a string representation from top to bottom. Complexity: O(n). */
+    public String toString() {
+        return this.deque.toString();
     }
 }

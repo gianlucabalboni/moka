@@ -1,0 +1,90 @@
+import std/datastructures/ArrayDeque;
+import std/datastructures/Deque;
+import std/datastructures/Hasher;
+import std/datastructures/Iterator;
+import std/datastructures/Queue;
+import std/datastructures/Stack;
+
+class Main {
+    public static int main() {
+        // 1. ArrayDeque<int> circular wraparound & resize beyond initial capacity (16)
+        ArrayDeque<int> dq = new ArrayDeque<>();
+        if (!dq.isEmpty() || dq.pollFirst() != 0 || dq.peekLast() != 0) {
+            Console.eprintln("Empty ArrayDeque failed");
+            return 1;
+        }
+        boolean nse = false;
+        try { dq.removeFirst(); } catch (NoSuchElementException e) { nse = true; }
+        if (!nse) { Console.eprintln("removeFirst on empty did not throw"); return 1; }
+
+        nse = false;
+        try { dq.getLast(); } catch (NoSuchElementException e) { nse = true; }
+        if (!nse) { Console.eprintln("getLast on empty did not throw"); return 1; }
+
+        // Push/pop wraparound
+        for (int i = 0; i < 40; i++) {
+            dq.addLast(i);
+            if (i % 3 == 0) {
+                dq.removeFirst();
+            }
+        }
+        // Now resize while head != 0
+        for (int i = 100; i < 150; i++) {
+            dq.addFirst(i);
+        }
+        if (dq.getFirst() != 149 || dq.getLast() != 39) {
+            Console.eprintln("ArrayDeque wraparound/resize failed");
+            return 1;
+        }
+
+        // 2. Iterators (forward, descending, fail-fast)
+        ArrayDeque<String> sdq = new ArrayDeque<>(new StringHasher());
+        sdq.addLast("A");
+        sdq.addLast("B");
+        sdq.addLast("C");
+        if (!sdq.toString().equals("[A, B, C]") || !sdq.contains("B")) {
+            Console.eprintln("ArrayDeque<String> toString/contains failed");
+            return 1;
+        }
+        Iterator<String> it = sdq.iterator();
+        String fwd = "";
+        while (it.hasNext()) {
+            fwd = fwd + it.next();
+        }
+        Iterator<String> dit = sdq.descendingIterator();
+        String rev = "";
+        while (dit.hasNext()) {
+            rev = rev + dit.next();
+        }
+        if (!fwd.equals("ABC") || !rev.equals("CBA")) {
+            Console.eprintln("ArrayDeque iterators failed: " + fwd + " / " + rev);
+            return 1;
+        }
+
+        Iterator<String> ff = sdq.iterator();
+        sdq.addLast("D");
+        boolean cme = false;
+        try { ff.next(); } catch (ConcurrentModificationException e) { cme = true; }
+        if (!cme) { Console.eprintln("ArrayDeque fail-fast failed"); return 1; }
+
+        // 3. Queue & Deque polymorphism + Stack<T>
+        Queue<int> q = new ArrayDeque<>();
+        q.offer(1);
+        q.offer(2);
+        if (q.element() != 1 || q.poll() != 1 || q.remove() != 2 || q.poll() != 0) {
+            Console.eprintln("Queue interface on ArrayDeque failed");
+            return 1;
+        }
+
+        Stack<int> st = new Stack<>();
+        st.push(10);
+        st.push(20);
+        if (st.peek() != 20 || st.pop() != 20 || st.pop() != 10 || !st.isEmpty()) {
+            Console.eprintln("Stack failed");
+            return 1;
+        }
+
+        Console.println("All Stage 1 ArrayDeque & Stack tests passed!");
+        return 0;
+    }
+}

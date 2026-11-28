@@ -1,55 +1,38 @@
-public class Queue<T> {
-    private T[] items;
-    private int head;
-    private int tail;
-    private int count;
+import std/datastructures/Collection;
 
-    public Queue() {
-        items = new T[8];
-        head = 0;
-        tail = 0;
-        count = 0;
-    }
+/**
+ * A collection designed for holding elements prior to processing (typically FIFO).
+ *
+ * Follows java.util.Queue semantics:
+ * - Throwing methods: add(E), remove(), element()
+ * - Special-value methods: offer(E), poll(), peek()
+ */
+public interface Queue<E> extends Collection<E> {
+    /**
+     * Inserts the specified element into this queue if possible.
+     * Returns true on success, false if capacity-restricted.
+     */
+    boolean offer(E elem);
 
-    public int size() {
-        return count;
-    }
+    /**
+     * Retrieves and removes the head of this queue.
+     * Throws NoSuchElementException if this queue is empty.
+     */
+    E remove();
 
-    public boolean isEmpty() {
-        return count == 0;
-    }
+    /**
+     * Retrieves and removes the head of this queue, or returns default(E) if empty.
+     */
+    E poll();
 
-    public void enqueue(T item) {
-        if (count >= items.length) {
-            int newCap = items.length * 2;
-            T[] next = new T[newCap];
-            for (int i = 0; i < count; i++) {
-                next[i] = items[(head + i) % items.length];
-            }
-            items = next;
-            head = 0;
-            tail = count;
-        }
-        items[tail] = item;
-        tail = (tail + 1) % items.length;
-        count++;
-    }
+    /**
+     * Retrieves, but does not remove, the head of this queue.
+     * Throws NoSuchElementException if this queue is empty.
+     */
+    E element();
 
-    public T dequeue() {
-        if (count == 0) {
-            throw new Exception("Queue underflow");
-        }
-        T val = items[head];
-        items[head] = default(T);
-        head = (head + 1) % items.length;
-        count--;
-        return val;
-    }
-
-    public T peek() {
-        if (count == 0) {
-            throw new Exception("Queue is empty");
-        }
-        return items[head];
-    }
+    /**
+     * Retrieves, but does not remove, the head of this queue, or returns default(E) if empty.
+     */
+    E peek();
 }

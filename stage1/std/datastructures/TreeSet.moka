@@ -1,0 +1,104 @@
+import std/Comparator;
+import std/datastructures/Collection;
+import std/datastructures/Iterator;
+import std/datastructures/Set;
+import std/datastructures/TreeMap;
+
+/**
+ * Navigable Set<E> implementation backed by TreeMap<E, boolean>.
+ *
+ * - Null policy: depends on Comparator<E>.
+ * - Thread safety: NOT thread-safe.
+ * - Fail-fast: iterator delegates to TreeMap.keySet().iterator().
+ */
+public class TreeSet<E> implements Set<E> {
+    private TreeMap<E, boolean> map;
+
+    /** Complexity: O(1). */
+    public TreeSet(Comparator<E> cmp) {
+        this.map = new TreeMap<E, boolean>(cmp);
+    }
+
+    /** Complexity: O(1). */
+    public int size() {
+        return this.map.size();
+    }
+
+    /** Complexity: O(1). */
+    public boolean isEmpty() {
+        return this.map.isEmpty();
+    }
+
+    /** Complexity: O(log n). */
+    public boolean contains(E elem) {
+        return this.map.containsKey(elem);
+    }
+
+    /** Complexity: O(log n). */
+    public boolean add(E elem) {
+        if (this.map.containsKey(elem)) {
+            return false;
+        }
+        this.map.put(elem, true);
+        return true;
+    }
+
+    /** Complexity: O(log n). */
+    public boolean remove(E elem) {
+        if (!this.map.containsKey(elem)) {
+            return false;
+        }
+        this.map.remove(elem);
+        return true;
+    }
+
+    /** Complexity: O(n). */
+    public void clear() {
+        this.map.clear();
+    }
+
+    /** Complexity: O(log n). Throws NoSuchElementException if empty. */
+    public E first() {
+        return this.map.firstKey();
+    }
+
+    /** Complexity: O(log n). Throws NoSuchElementException if empty. */
+    public E last() {
+        return this.map.lastKey();
+    }
+
+    /** Complexity: O(log n). Throws NoSuchElementException if none exists. */
+    public E floor(E elem) {
+        return this.map.floorKey(elem);
+    }
+
+    /** Complexity: O(log n). Throws NoSuchElementException if none exists. */
+    public E ceiling(E elem) {
+        return this.map.ceilingKey(elem);
+    }
+
+    /** Complexity: O(log n). Throws NoSuchElementException if none exists. */
+    public E lower(E elem) {
+        return this.map.lowerKey(elem);
+    }
+
+    /** Complexity: O(log n). Throws NoSuchElementException if none exists. */
+    public E higher(E elem) {
+        return this.map.higherKey(elem);
+    }
+
+    /** Complexity: O(1). */
+    public Iterator<E> iterator() {
+        return this.map.keySet().iterator();
+    }
+
+    /** Complexity: O(n). */
+    public E[] toArray() {
+        return this.map.keySet().toArray();
+    }
+
+    /** Complexity: O(n). */
+    public String toString() {
+        return this.map.keySet().toString();
+    }
+}
