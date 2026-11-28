@@ -1,3 +1,9 @@
+/**
+ * main.c — CLI driver for the Stage 0 bootstrap compiler (`stage0/build/mokac`).
+ *
+ * Reads one or more `.moka` source files into memory, runs Lexer -> Parser ->
+ * Sema -> Codegen, and writes the resulting C11 translation unit.
+ */
 #include "codegen.h"
 #include "parser.h"
 #include "runtime.h"

@@ -1,3 +1,8 @@
+/**
+ * parser.h — Stage 0 recursive-descent parser interface (3-token lookahead).
+ *
+ * Parses the Stage 0 Moka subset into an arena-allocated AST Program.
+ */
 #ifndef MOKA_PARSER_H
 #define MOKA_PARSER_H
 

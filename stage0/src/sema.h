@@ -1,3 +1,9 @@
+/**
+ * sema.h — Stage 0 two-pass semantic analyzer.
+ *
+ * Pass 1 registers all classes, fields, constructors, and method signatures.
+ * Pass 2 type-checks method bodies, calls, arrays, and control flow.
+ */
 #ifndef MOKA_SEMA_H
 #define MOKA_SEMA_H
 

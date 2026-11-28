@@ -2,19 +2,140 @@
 
 > 🌐 **Language**: **English** | [Italiano](README.it.md)
 
-**Moka** is a statically typed, Java-inspired programming language that transpiles to **standard C11** (`-std=c11 -pthread -lm`) with zero external dependencies.
+**Write Java. Ship C11.**
 
-The compiler follows a two-stage **self-hosting bootstrap** architecture:
+**Moka** is a statically typed, Java-syntax programming language that compiles ahead-of-time to **standard C11** (`-std=c11 -O2 -pthread -lm`) with **zero JVM, zero bytecode, and zero external dependencies**.
 
-1. **[`stage0/`](stage0/README.md)** — Minimal bootstrap compiler written in **C11** (`stage0/src/*.c`), using an Arena Allocator and supporting the core language subset.
+---
+
+## Why Moka instead of Java?
+
+| | Moka | Java (OpenJDK 21) |
+|---|---|---|
+| **Cold Start** | **`1.1 ms`** native binary | `31.4 ms` JVM startup (`~28x` slower) |
+| **Generics** | **Monomorphized & unboxed** (`ArrayList<int>`, `HashMap<int, int>`, `PriorityQueue<int>`) | Type-erased & boxed (`Integer` heap allocation per element) |
+| **Memory Footprint** | **`13.51 MB`** (`ListInt`), **`118.40 MB`** (`DataStructuresBench`) | `76.12 MB` (`ListInt`), `290.97 MB` (`DataStructuresBench`) |
+| **Deployment** | Single standalone native executable | Requires JRE / JVM runtime |
+| **C Interop** | Direct `native` C11 integration | JNI boilerplate |
+
+- **Familiar Java Ergonomics**: classes, single inheritance (`extends`), interfaces with inheritance (`interface A extends B, C`), `abstract`, `final`, `try / catch / finally / throw`, `synchronized`, `Thread` / `Mutex`, `for (T x : col)` (`for-each`), diamond `<>` inference, and a `java.util`-inspired `std/datastructures/*` library.
+- **Zero-Overhead Primitive Generics**: `ArrayList<int>`, `TreeMap<int, int>`, and `PriorityQueue<int>` store `int32_t` values contiguously with **zero boxing**.
+- **Self-Hosting & Verified**: `stage1` compiles itself into byte-for-byte identical C11 (`stage1_gen1.c == stage1_gen2.c`).
+
+---
+
+## Examples
+
+### 1. Unboxed Generics, `HashMap`, `ArrayList`, Sorting & `for-each`
+
+```moka
+import std/Comparator;
+import std/datastructures/ArrayList;
+import std/datastructures/HashMap;
+import std/datastructures/Hasher;
+import std/datastructures/MapEntry;
+
+class Main {
+    public static int main() {
+        // Unboxed ArrayList<int> + stable merge sort
+        ArrayList<int> nums = new ArrayList<>();
+        nums.add(42);
+        nums.add(7);
+        nums.add(19);
+        nums.sort(new IntComparator());
+
+        for (int n : nums) {
+            Console.println("num = " + n);
+        }
+
+        // Open-addressed HashMap<String, int> (unboxed int values)
+        HashMap<String, int> scores = new HashMap<>(new StringHasher());
+        scores.put("Alice", 95);
+        scores.put("Bob", 88);
+
+        for (MapEntry<String, int> entry : scores.entrySet()) {
+            Console.println(entry.getKey() + " -> " + entry.getValue());
+        }
+        return 0;
+    }
+}
+```
+
+### 2. Exceptions, Interfaces & `PriorityQueue`
+
+```moka
+import std/Comparable;
+import std/Comparator;
+import std/datastructures/PriorityQueue;
+
+class Job implements Comparable<Job> {
+    public int priority;
+    public String name;
+
+    public Job(int priority, String name) {
+        this.priority = priority;
+        this.name = name;
+    }
+
+    public int compareTo(Job other) {
+        if (this.priority < other.priority) return -1;
+        if (this.priority > other.priority) return 1;
+        return 0;
+    }
+}
+
+class Main {
+    public static int main() {
+        PriorityQueue<Job> pq = new PriorityQueue<>(new NaturalOrder<Job>());
+        pq.offer(new Job(3, "low"));
+        pq.offer(new Job(1, "urgent"));
+        pq.offer(new Job(2, "normal"));
+
+        while (!pq.isEmpty()) {
+            Job j = pq.poll();
+            Console.println(j.name + " (" + j.priority + ")");
+        }
+
+        try {
+            pq.remove(); // throws NoSuchElementException on empty queue
+        } catch (NoSuchElementException e) {
+            Console.println("Caught: " + e.getMessage());
+        }
+        return 0;
+    }
+}
+```
+
+---
+
+## Benchmarks (Moka vs OpenJDK 21)
+
+Measured with [`python3 benchmarks/run_benchmarks.py`](benchmarks/run_benchmarks.py) (median of 3 runs via `os.wait4`; see [benchmarks/README.md](benchmarks/README.md) for full details):
+
+| Benchmark | Description | Moka Time | Java Time | Moka Peak RSS | Java Peak RSS |
+|---|---|---:|---:|---:|---:|
+| **Startup** | Minimal Hello World (cold start) | **`1.1 ms`** | `31.4 ms` | **`13.51 MB`** | `42.12 MB` |
+| **FibCpu** | Recursive `fib(42)` | **`487.0 ms`** | `1183.2 ms` | **`13.51 MB`** | `42.87 MB` |
+| **ListInt** | `1,000,000` ints in `ArrayList` + sum | **`20.6 ms`** | `66.9 ms` | **`13.51 MB`** | `76.12 MB` |
+| **GcStress** | `500,000` temp allocations + `1,000` live | **`23.5 ms`** | `54.9 ms` | **`13.51 MB`** | `55.91 MB` |
+| **DataStructuresBench** | 1M ops each on `ArrayList`, `HashMap`, `TreeMap`, `PriorityQueue` | `1934.2 ms` | `1599.8 ms` | **`118.40 MB`** | `290.97 MB` |
+
+In `DataStructuresBench` (1,000,000 insert/read/remove ops per structure), Moka's unboxed `PriorityQueue<int>` runs in **`357 ms`** vs **`675 ms`** in Java (`~1.9x` faster) and `ArrayList<int>` in **`32 ms`** vs **`34 ms`**, while cutting peak RSS by **`2.46x`**.
+
+---
+
+## Architecture
+
+Moka uses a two-stage **self-hosting bootstrap** pipeline:
+
+1. **[`stage0/`](stage0/README.md)** — Minimal bootstrap compiler written in **C11** (`stage0/src/*.c`), using an Arena Allocator and compiling the core language subset.
 2. **[`stage1/`](stage1/README.md)** — Full **self-hosting** compiler written in **Moka** (`stage1/src/*.moka`), featuring:
-   - **Primitive types**: `int`, `long`, `float`, `double`, `byte`, `char`, `boolean` + `default(T)`
-   - **OOP**: single inheritance (`extends`), `super`, VTable polymorphism, `interface` / `implements` (fat pointers), `abstract`, `final`, `static class`, method & constructor overloading, `instanceof` & checked downcasting
-   - **Strings**: immutable `+` / `+=` / `concat()`, mutable `append()`, `charAt()`, `toInt()` / `toLong()` / `toDouble()` / `toFloat()`
-   - **Exceptions**: `try / catch / finally / throw` (`setjmp`/`longjmp` with GC shadow stack unwinding)
-   - **Generics via Monomorphization**: generic classes, interfaces, and methods (including primitive type arguments like `Box<int>`, diamond `new Box<>()`, and type inference)
-   - **Concurrency**: `Thread`, `Runnable`, `Mutex`, `synchronized` blocks/methods with a cooperative **Stop-the-World Mark-and-Sweep GC**
-   - **Modules & Standard Library**: `import`, `Console`, `Io`, `ByteBuffer`, `Exception`, `Math`, and `std/datastructures/*` (`List`, `ArrayList`, `Stack`, `Queue`, `Map`, `StringMap`)
+   - **Primitives**: `int`, `long`, `float`, `double`, `byte`, `char`, `boolean` + `default(T)`
+   - **OOP & Interfaces**: single inheritance (`extends`), `super`, VTable polymorphism, `interface` inheritance (`interface A extends B, C`), `abstract`, `final`, `static class`, overloading, `instanceof` & checked casts
+   - **Control Flow**: `for`, `for (T x : col)` (`for-each`), `while`, `switch`, `try / catch / finally / throw`
+   - **Generics via Monomorphization**: classes, interfaces, and methods with primitive and reference arguments
+   - **Concurrency & GC**: `Thread`, `Runnable`, `Mutex`, `synchronized`, cooperative Stop-the-World Mark-and-Sweep GC
+   - **Standard Library**: `String` (`Comparable<String>`, cached `hashCode`), `Comparable<T>`, `Comparator<T>`, `Console`, `Io`, `ByteBuffer`, `Math`, exception hierarchy (`std/Exceptions`), and `std/datastructures/*` (`Iterator`, `Iterable`, `Collection`, `List`, `Queue`, `Deque`, `Set`, `Map`, `ArrayList`, `ArrayDeque`, `LinkedList`, `Stack`, `PriorityQueue`, `HashMap`, `HashSet`, `TreeMap`, `TreeSet`, `Collections`)
 
 ---
 
@@ -24,7 +145,7 @@ The compiler follows a two-stage **self-hosting bootstrap** architecture:
 # 1. Build and test Stage 0 (C11 bootstrap compiler)
 make -C stage0 all
 
-# 2. Build Stage 1 via Stage 0, run all 18 test suites, and verify bootstrap fixed-point
+# 2. Build Stage 1 via Stage 0, run all 26 test suites, and verify bootstrap fixed-point
 make -C stage1 all
 ```
 
@@ -70,9 +191,8 @@ make -C stage1 uninstall
 moka/
 ├── README.md              # Project overview (English)
 ├── README.it.md           # Project overview (Italiano)
-├── docs/
-│   ├── en/                # English language & stdlib documentation
-│   └── it/                # Italian language & stdlib documentation
+├── benchmarks/            # Moka vs Java benchmark suite
+├── docs/                  # Language, stdlib & internals documentation (en/ & it/)
 ├── examples/              # Example Moka programs
 ├── stage0/                # Minimal C11 bootstrap compiler
 └── stage1/                # Self-hosting Moka compiler, runtime, stdlib & tests

@@ -1,3 +1,9 @@
+/**
+ * lexer.h — Stage 0 zero-copy tokenizer interface.
+ *
+ * Defines TokenKind, Token (slice into source buffer with line/col), and
+ * Lexer API for scanning the Stage 0 Moka subset.
+ */
 #ifndef MOKA_LEXER_H
 #define MOKA_LEXER_H
 

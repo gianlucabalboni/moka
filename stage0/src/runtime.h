@@ -1,3 +1,10 @@
+/**
+ * runtime.h — Stage 0 C11 bootstrap runtime.
+ *
+ * Provides the Arena Allocator (RtArena), minimal object/array headers (Obj,
+ * RtArray), string/byte helpers, and native I/O functions used by Stage 0
+ * compiled programs (including compiling Stage 1).
+ */
 #ifndef MOKA_RUNTIME_H
 #define MOKA_RUNTIME_H
 

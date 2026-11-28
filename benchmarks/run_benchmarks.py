@@ -5,11 +5,16 @@ import subprocess
 import time
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(ROOT)
 BUILD = os.path.join(ROOT, "build")
 os.makedirs(BUILD, exist_ok=True)
 
-CASES = ["Startup", "FibCpu", "ListInt", "GcStress"]
+CASES = ["Startup", "FibCpu", "ListInt", "GcStress", "DataStructuresBench"]
 RUNS = 3
+
+LOCAL_MOKAC = os.path.join(REPO_ROOT, "stage1", "build", "mokac")
+LOCAL_STD = os.path.join(REPO_ROOT, "stage1", "std")
+LOCAL_RUNTIME = os.path.join(REPO_ROOT, "stage1", "runtime")
 
 
 def measure_cmd(cmd):
@@ -38,23 +43,35 @@ def main():
     for name in CASES:
         moka_src = os.path.join(ROOT, "moka", f"{name}.moka")
         moka_bin = os.path.join(BUILD, f"moka_{name}")
-        subprocess.run(["mokac", moka_src, "-o", moka_bin], check=True)
+        if os.path.exists(LOCAL_MOKAC):
+            mokac_cmd = [LOCAL_MOKAC, "--std-dir", LOCAL_STD, "--runtime-dir", LOCAL_RUNTIME, moka_src, "-o", moka_bin]
+        else:
+            mokac_cmd = ["mokac", moka_src, "-o", moka_bin]
+        subprocess.run(mokac_cmd, check=True)
 
         java_src = os.path.join(ROOT, "java", f"{name}.java")
         subprocess.run(["javac", "-d", BUILD, java_src], check=True)
 
     print(f"\nRunning {RUNS} iterations each (reporting median):\n")
-    header = f"{'Benchmark':<12} | {'Moka Time':>10} | {'Java Time':>10} | {'Moka RSS':>10} | {'Java RSS':>10}"
+    header = f"{'Benchmark':<20} | {'Moka Time':>10} | {'Java Time':>10} | {'Moka RSS':>10} | {'Java RSS':>10}"
     print(header)
     print("-" * len(header))
 
+    ds_details = None
     for name in CASES:
         moka_bin = os.path.join(BUILD, f"moka_{name}")
         m_ms, m_rss, m_out = measure_cmd([moka_bin])
         j_ms, j_rss, j_out = measure_cmd(["java", "-cp", BUILD, name])
         print(
-            f"{name:<12} | {m_ms:>8.1f}ms | {j_ms:>8.1f}ms | {m_rss/1024.0:>7.2f}MB | {j_rss/1024.0:>7.2f}MB"
+            f"{name:<20} | {m_ms:>8.1f}ms | {j_ms:>8.1f}ms | {m_rss/1024.0:>7.2f}MB | {j_rss/1024.0:>7.2f}MB"
         )
+        if name == "DataStructuresBench":
+            ds_details = (m_out, j_out)
+
+    if ds_details is not None:
+        print("\nDataStructuresBench breakdown (1,000,000 ops each):")
+        print("Moka:\n" + ds_details[0])
+        print("Java:\n" + ds_details[1])
 
 
 if __name__ == "__main__":

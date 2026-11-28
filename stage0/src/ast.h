@@ -1,3 +1,9 @@
+/**
+ * ast.h — Stage 0 Abstract Syntax Tree definitions.
+ *
+ * Arena-allocated AST nodes for types, expressions, statements, fields,
+ * methods, classes, and the top-level Program.
+ */
 #ifndef MOKA_AST_H
 #define MOKA_AST_H
 
