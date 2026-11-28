@@ -73,6 +73,7 @@ moka/
 ├── docs/
 │   ├── en/                # Documentazione linguaggio e stdlib in Inglese
 │   └── it/                # Documentazione linguaggio e stdlib in Italiano
+├── examples/              # Programmi di esempio Moka
 ├── stage0/                # Compilatore bootstrap minimale in C11
 └── stage1/                # Compilatore self-hosting, runtime, stdlib e test
     ├── Makefile

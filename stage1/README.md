@@ -23,7 +23,7 @@
 - [`runtime/runtime.h`](runtime/runtime.h): GC Mark-and-Sweep, Shadow Stack, `RtArray`, `RtTypeInfo` e helper `native`.
 - [`std/`](std): `String.moka`, `Console.moka`, `ByteBuffer.moka`, `Io.moka`.
 - [`src/`](src): `Token.moka`, `Lexer.moka`, `Ast.moka`, `Parser.moka`, `Sema.moka`, `Codegen.moka`, `Main.moka`.
-- [`examples/`](examples): `linked_list.moka`, `word_count.moka`.
+- [`../examples/`](../examples): `linked_list.moka`, `word_count.moka`.
 - [`tests/`](tests): `test_std.moka`, `test_lexer.moka`, `hello_console.moka`, `test_gc.moka`, `test_stage1_features.moka`, `test_inheritance.moka`.
 
 ---
@@ -35,11 +35,11 @@
 make all
 
 # Compila un programma Moka direttamente in eseguibile (std/ e runtime/ inclusi automaticamente)
-build/mokac -o build/linked_list examples/linked_list.moka
+build/mokac -o build/linked_list ../examples/linked_list.moka
 ./build/linked_list
 
 # Emette solo il file C11
-build/mokac --emit-c examples/linked_list.moka -o build/linked_list.c
+build/mokac --emit-c ../examples/linked_list.moka -o build/linked_list.c
 ```
 
 Opzioni CLI di `mokac`:

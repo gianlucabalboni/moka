@@ -1,0 +1,155 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Moka",
+  "scopeName": "source.moka",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#chars" },
+    { "include": "#numbers" },
+    { "include": "#declarations" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#functions" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.moka",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.moka",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.moka",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.moka",
+          "match": "\\\\([ntr0\\\\\"'])"
+        },
+        {
+          "name": "invalid.illegal.escape.moka",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "chars": {
+      "name": "string.quoted.single.moka",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.moka",
+          "match": "\\\\([ntr0\\\\\"'])"
+        },
+        {
+          "name": "invalid.illegal.escape.moka",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.moka",
+          "match": "\\b[0-9]+\\.[0-9]+[fFdD]?\\b|\\b[0-9]+[fFdD]\\b"
+        },
+        {
+          "name": "constant.numeric.integer.long.moka",
+          "match": "\\b[0-9]+[lL]\\b"
+        },
+        {
+          "name": "constant.numeric.integer.moka",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.moka",
+          "match": "\\b(if|else|while|for|switch|case|default|break|continue|return|try|catch|finally|throw|import)\\b"
+        },
+        {
+          "name": "storage.modifier.moka",
+          "match": "\\b(public|private|static|final|abstract|native|synchronized)\\b"
+        },
+        {
+          "name": "keyword.other.declaration.moka",
+          "match": "\\b(class|interface|extends|implements)\\b"
+        },
+        {
+          "name": "keyword.operator.new.moka",
+          "match": "\\b(new|instanceof)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.moka",
+          "match": "\\b(void|int|long|float|double|byte|char|boolean)\\b"
+        },
+        {
+          "name": "support.class.moka",
+          "match": "\\b(String|Console|Io|ByteBuffer|Exception|Math|Thread|Runnable|Mutex|List|ArrayList|Stack|Queue|Map|StringMap)\\b"
+        },
+        {
+          "name": "entity.name.type.moka",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.moka",
+          "match": "\\b(true|false|null)\\b"
+        },
+        {
+          "name": "variable.language.moka",
+          "match": "\\b(this|super)\\b"
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(class|interface)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.other.declaration.moka" },
+            "2": { "name": "entity.name.type.class.moka" }
+          }
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?:<[^>]+>)?\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.moka" }
+          }
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.moka",
+          "match": "\\+\\+|--|\\+=|-=|\\*=|/=|%=|==|!=|<=|>=|&&|\\|\\||<<|>>|[+\\-*/%&|^~!=<>]"
+        }
+      ]
+    }
+  }
+}
