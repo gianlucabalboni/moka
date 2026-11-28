@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/moka-logo.png" alt="Logo Moka" width="128" />
+</p>
+
 # Moka
 
 > 🌐 **Lingua**: [English](README.md) | **Italiano**

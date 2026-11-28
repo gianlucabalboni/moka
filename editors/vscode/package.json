@@ -4,6 +4,7 @@
   "description": "Syntax highlighting and language configuration for the Moka programming language (.moka).",
   "version": "0.1.0",
   "publisher": "moka-lang",
+  "icon": "images/moka-icon.png",
   "engines": {
     "vscode": "^1.70.0"
   },
@@ -21,6 +22,10 @@
         "extensions": [
           ".moka"
         ],
+        "icon": {
+          "light": "./images/moka-file-light.svg",
+          "dark": "./images/moka-file-dark.svg"
+        },
         "configuration": "./language-configuration.json"
       }
     ],
