@@ -114,13 +114,13 @@ Measured with [`python3 benchmarks/run_benchmarks.py`](benchmarks/run_benchmarks
 
 | Benchmark | Description | Moka Time | Java Time | Moka Peak RSS | Java Peak RSS |
 |---|---|---:|---:|---:|---:|
-| **Startup** | Minimal Hello World (cold start) | **`1.1 ms`** | `31.4 ms` | **`13.51 MB`** | `42.12 MB` |
-| **FibCpu** | Recursive `fib(42)` | **`487.0 ms`** | `1183.2 ms` | **`13.51 MB`** | `42.87 MB` |
-| **ListInt** | `1,000,000` ints in `ArrayList` + sum | **`20.6 ms`** | `66.9 ms` | **`13.51 MB`** | `76.12 MB` |
-| **GcStress** | `500,000` temp allocations + `1,000` live | **`23.5 ms`** | `54.9 ms` | **`13.51 MB`** | `55.91 MB` |
-| **DataStructuresBench** | 1M ops each on `ArrayList`, `HashMap`, `TreeMap`, `PriorityQueue` | `1934.2 ms` | `1599.8 ms` | **`118.40 MB`** | `290.97 MB` |
+| **Startup** | Minimal Hello World (cold start) | **`1.0 ms`** | `31.9 ms` | **`13.91 MB`** | `42.14 MB` |
+| **FibCpu** | Recursive `fib(42)` | **`485.5 ms`** | `1187.7 ms` | **`13.91 MB`** | `43.04 MB` |
+| **ListInt** | `1,000,000` ints in `ArrayList` + sum | **`20.7 ms`** | `68.5 ms` | **`13.91 MB`** | `76.04 MB` |
+| **GcStress** | `500,000` temp allocations + `1,000` live | **`24.5 ms`** | `56.1 ms` | **`13.91 MB`** | `55.84 MB` |
+| **DataStructuresBench** | 1M ops each on `ArrayList`, `HashMap`, `TreeMap`, `PriorityQueue` | **`1904.1 ms`** | `2425.6 ms` | **`118.05 MB`** | `285.52 MB` |
 
-In `DataStructuresBench` (1,000,000 insert/read/remove ops per structure), Moka's unboxed `PriorityQueue<int>` runs in **`357 ms`** vs **`675 ms`** in Java (`~1.9x` faster) and `ArrayList<int>` in **`32 ms`** vs **`34 ms`**, while cutting peak RSS by **`2.46x`**.
+In `DataStructuresBench` (1,000,000 insert/read/remove ops per structure), Moka wins overall (`1904.1 ms` vs `2425.6 ms`), with unboxed `PriorityQueue<int>` running in **`348 ms`** vs **`759 ms`** (`~2.2x` faster) and `TreeMap<int, int>` in **`1107 ms`** vs **`1397 ms`**, while cutting peak RSS by **`2.42x`**.
 
 ---
 

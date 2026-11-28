@@ -176,8 +176,17 @@ public class HashMap<K, V> implements Map<K, V> {
 
     /** Complexity: O(1) expected. */
     public boolean containsKey(K key) {
-        int h = this.spreadHash(key);
-        return this.findSlot(key, h) >= 0;
+        long lh = (long) this.hasher.hash(key) & 4294967295L;
+        int h = (int) (lh ^ (lh >> 16));
+        int mask = this.keys.length - 1;
+        int idx = h & mask;
+        while (this.occupied[idx]) {
+            if (this.hashes[idx] == h && this.hasher.equals(this.keys[idx], key)) {
+                return true;
+            }
+            idx = (idx + 1) & mask;
+        }
+        return false;
     }
 
     /** Complexity: O(n). */
@@ -196,12 +205,17 @@ public class HashMap<K, V> implements Map<K, V> {
      * Complexity: O(1) expected.
      */
     public V get(K key) {
-        int h = this.spreadHash(key);
-        int idx = this.findSlot(key, h);
-        if (idx < 0) {
-            throw new NoSuchElementException("Key not found in HashMap: " + key);
+        long lh = (long) this.hasher.hash(key) & 4294967295L;
+        int h = (int) (lh ^ (lh >> 16));
+        int mask = this.keys.length - 1;
+        int idx = h & mask;
+        while (this.occupied[idx]) {
+            if (this.hashes[idx] == h && this.hasher.equals(this.keys[idx], key)) {
+                return this.values[idx];
+            }
+            idx = (idx + 1) & mask;
         }
-        return this.values[idx];
+        throw new NoSuchElementException("Key not found in HashMap: " + key);
     }
 
     /**
@@ -209,12 +223,17 @@ public class HashMap<K, V> implements Map<K, V> {
      * Complexity: O(1) expected.
      */
     public V getOrDefault(K key, V defaultValue) {
-        int h = this.spreadHash(key);
-        int idx = this.findSlot(key, h);
-        if (idx < 0) {
-            return defaultValue;
+        long lh = (long) this.hasher.hash(key) & 4294967295L;
+        int h = (int) (lh ^ (lh >> 16));
+        int mask = this.keys.length - 1;
+        int idx = h & mask;
+        while (this.occupied[idx]) {
+            if (this.hashes[idx] == h && this.hasher.equals(this.keys[idx], key)) {
+                return this.values[idx];
+            }
+            idx = (idx + 1) & mask;
         }
-        return this.values[idx];
+        return defaultValue;
     }
 
     /**
@@ -222,7 +241,8 @@ public class HashMap<K, V> implements Map<K, V> {
      * Complexity: O(1) amortized expected.
      */
     public V put(K key, V value) {
-        int h = this.spreadHash(key);
+        long lh = (long) this.hasher.hash(key) & 4294967295L;
+        int h = (int) (lh ^ (lh >> 16));
         int mask = this.keys.length - 1;
         int idx = h & mask;
         while (this.occupied[idx]) {
@@ -256,14 +276,19 @@ public class HashMap<K, V> implements Map<K, V> {
      * Complexity: O(1) expected.
      */
     public V remove(K key) {
-        int h = this.spreadHash(key);
-        int idx = this.findSlot(key, h);
-        if (idx < 0) {
-            throw new NoSuchElementException("Key not found in HashMap: " + key);
+        long lh = (long) this.hasher.hash(key) & 4294967295L;
+        int h = (int) (lh ^ (lh >> 16));
+        int mask = this.keys.length - 1;
+        int idx = h & mask;
+        while (this.occupied[idx]) {
+            if (this.hashes[idx] == h && this.hasher.equals(this.keys[idx], key)) {
+                V old = this.values[idx];
+                this.removeSlot(idx);
+                return old;
+            }
+            idx = (idx + 1) & mask;
         }
-        V old = this.values[idx];
-        this.removeSlot(idx);
-        return old;
+        throw new NoSuchElementException("Key not found in HashMap: " + key);
     }
 
     /** Clears all mappings and releases references for GC. Complexity: O(capacity). */

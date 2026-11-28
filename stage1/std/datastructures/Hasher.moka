@@ -14,17 +14,11 @@ public interface Hasher<K> {
 }
 
 /**
- * Unboxed Hasher for primitive int using SplitMix32 mixing.
+ * Unboxed Hasher for primitive int using Knuth multiplicative hashing.
  */
-public class IntHasher implements Hasher<int> {
+public final class IntHasher implements Hasher<int> {
     public int hash(int key) {
-        long x = (long) key & 4294967295L;
-        x = ((x >> 16) ^ x) * 73244475L;
-        x = x & 4294967295L;
-        x = ((x >> 16) ^ x) * 73244475L;
-        x = x & 4294967295L;
-        x = (x >> 16) ^ x;
-        return (int) x;
+        return (int) (((long) key * 2654435761L) & 4294967295L);
     }
 
     public boolean equals(int a, int b) {

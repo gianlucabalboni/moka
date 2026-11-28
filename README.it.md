@@ -114,13 +114,13 @@ Misurati con [`python3 benchmarks/run_benchmarks.py`](benchmarks/run_benchmarks.
 
 | Benchmark | Descrizione | Tempo Moka | Tempo Java | Picco RSS Moka | Picco RSS Java |
 |---|---|---:|---:|---:|---:|
-| **Startup** | Hello World minimale (cold start) | **`1.1 ms`** | `31.4 ms` | **`13.51 MB`** | `42.12 MB` |
-| **FibCpu** | `fib(42)` ricorsivo | **`487.0 ms`** | `1183.2 ms` | **`13.51 MB`** | `42.87 MB` |
-| **ListInt** | `1.000.000` di `int` in `ArrayList` + somma | **`20.6 ms`** | `66.9 ms` | **`13.51 MB`** | `76.12 MB` |
-| **GcStress** | `500.000` allocazioni temp + `1.000` nodi vivi | **`23.5 ms`** | `54.9 ms` | **`13.51 MB`** | `55.91 MB` |
-| **DataStructuresBench** | 1M op ciascuna su `ArrayList`, `HashMap`, `TreeMap`, `PriorityQueue` | `1934.2 ms` | `1599.8 ms` | **`118.40 MB`** | `290.97 MB` |
+| **Startup** | Hello World minimale (cold start) | **`1.0 ms`** | `31.9 ms` | **`13.91 MB`** | `42.14 MB` |
+| **FibCpu** | `fib(42)` ricorsivo | **`485.5 ms`** | `1187.7 ms` | **`13.91 MB`** | `43.04 MB` |
+| **ListInt** | `1.000.000` di `int` in `ArrayList` + somma | **`20.7 ms`** | `68.5 ms` | **`13.91 MB`** | `76.04 MB` |
+| **GcStress** | `500.000` allocazioni temp + `1.000` nodi vivi | **`24.5 ms`** | `56.1 ms` | **`13.91 MB`** | `55.84 MB` |
+| **DataStructuresBench** | 1M op ciascuna su `ArrayList`, `HashMap`, `TreeMap`, `PriorityQueue` | **`1904.1 ms`** | `2425.6 ms` | **`118.05 MB`** | `285.52 MB` |
 
-In `DataStructuresBench` (1.000.000 operazioni insert/read/remove per struttura), `PriorityQueue<int>` unboxed di Moka impiega **`357 ms`** contro **`675 ms`** in Java (`~1.9x` più veloce) e `ArrayList<int>` **`32 ms`** contro **`34 ms`**, riducendo il picco di memoria RSS di **`2.46x`**.
+In `DataStructuresBench` (1.000.000 operazioni insert/read/remove per struttura), Moka vince complessivamente (`1904.1 ms` vs `2425.6 ms`), con `PriorityQueue<int>` in **`348 ms`** vs **`759 ms`** (`~2.2x` più veloce) e `TreeMap<int, int>` in **`1107 ms`** vs **`1397 ms`**, riducendo il picco RSS di **`2.42x`**.
 
 ---
 

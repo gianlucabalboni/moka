@@ -767,6 +767,25 @@ public class Codegen {
                     this.out.appendString("((");
                     this.out.appendString(m.owner.name);
                     this.out.appendString("*)this");
+                } else if (!obj.inferredType.resolvedClass.isInterface &&
+                           m.owner == obj.inferredType.resolvedClass &&
+                           (m.isFinal || obj.inferredType.resolvedClass.isFinal)) {
+                    /* Devirtualized direct call for final method/class */
+                    this.out.appendString(m.cName);
+                    this.out.appendByte('(');
+                    if (obj.kind == ExprKind.THIS()) {
+                        this.out.appendString("this");
+                    } else {
+                        this.out.appendString("((");
+                        this.out.appendString(m.owner.name);
+                        this.out.appendString("*)rt_null_check(");
+                        this.emitExpr(obj);
+                        this.out.appendString(", \"");
+                        this.out.appendString(m.owner.name);
+                        this.out.appendByte('.');
+                        this.out.appendString(m.name);
+                        this.out.appendString("\"))");
+                    }
                 } else {
                     /* Virtual dispatch via VTable helper */
                     String staticCls = obj.inferredType.resolvedClass.name;
