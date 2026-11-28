@@ -1,3 +1,15 @@
+/**
+ * Ast.moka — Abstract Syntax Tree node definitions for Stage 1 Moka.
+ *
+ * Contains:
+ * - TypeKind / Type: primitive, array, and parameterized class/interface types.
+ * - ExprKind / UnaryOp / BinaryOp / Expr: expression nodes with inferredType.
+ * - StmtKind / Stmt: statement nodes (including FOREACH, TRY/CATCH, SYNCHRONIZED).
+ * - Param / FieldDecl / MethodDecl / ClassDecl / Program: declarations & lists.
+ *
+ * Note: ClassDecl reuses implNames/implTypes/impls both for a class's
+ * `implements` list and for an interface's `extends` superinterfaces.
+ */
 public class TypeKind {
     public static int VOID()    { return 0; }
     public static int INT()     { return 1; }
@@ -226,6 +238,7 @@ public class StmtKind {
     public static int CATCH()        { return 13; }
     public static int THROW()        { return 14; }
     public static int SYNCHRONIZED() { return 15; }
+    public static int FOREACH()      { return 16; }
 }
 
 public class Stmt {

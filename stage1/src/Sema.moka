@@ -1,3 +1,20 @@
+/**
+ * Sema.moka — Semantic analyzer, monomorphizer, and AST desugaring pass.
+ *
+ * Analysis pipeline:
+ * 1. Class & interface hierarchy resolution (checkClassHierarchy):
+ *    resolves superclasses, superinterfaces, flattens inherited interface methods
+ *    (flattenInterfaceMethods), and checks for inheritance cycles.
+ * 2. VTable & interface verification: builds class VTables and verifies all
+ *    abstract and interface methods are implemented with compatible signatures.
+ * 3. Generic monomorphization (instantiateClass / instantiateMethod):
+ *    generic templates (isGenericTemplate) are skipped during template passes and
+ *    instantiated + typechecked on demand for each concrete type argument tuple
+ *    (supporting both reference and unboxed primitive types).
+ * 4. Statement/expression typechecking & desugaring:
+ *    - StmtKind.FOREACH is desugared into a standard FOR loop over T[] or Iterator<T>.
+ *    - Checks numeric promotions, RTTI casts/instanceof, exceptions, and `final`.
+ */
 public class VarBinding {
     public String name;
     public Type type;
@@ -90,6 +107,7 @@ public class Sema {
     private Scope scope;
     private int loopDepth;
     private int breakDepth;
+    private int foreachCounter;
     public boolean hadError;
 
     private Type tyVoid;
@@ -109,6 +127,7 @@ public class Sema {
         this.prog = prog;
         this.loopDepth = 0;
         this.breakDepth = 0;
+        this.foreachCounter = 0;
         this.hadError = false;
         this.tyVoid = new Type(TypeKind.VOID());
         this.tyInt = new Type(TypeKind.INT());
@@ -2156,6 +2175,146 @@ public class Sema {
             this.checkStmt(st.thenBranch);
             this.breakDepth = this.breakDepth - 1;
             this.loopDepth = this.loopDepth - 1;
+            return;
+        }
+        if (k == StmtKind.FOREACH()) {
+            this.checkExpr(st.expr);
+            if (this.hadError) return;
+            if (!this.resolveType(st.varType, st.line, st.col)) {
+                return;
+            }
+            Type colTy = st.expr.inferredType;
+            int id = this.foreachCounter;
+            this.foreachCounter = this.foreachCounter + 1;
+            Stmt origBody = st.thenBranch;
+
+            if (colTy != null && colTy.kind == TypeKind.ARRAY()) {
+                String arrName = "__fe_arr_".concat(String.fromInt(id));
+                String idxName = "__fe_idx_".concat(String.fromInt(id));
+
+                Stmt arrDecl = new Stmt(StmtKind.VAR_DECL(), st.line, st.col);
+                arrDecl.varType = colTy;
+                arrDecl.varName = arrName;
+                arrDecl.expr = st.expr;
+
+                Stmt idxDecl = new Stmt(StmtKind.VAR_DECL(), st.line, st.col);
+                idxDecl.varType = this.tyInt;
+                idxDecl.varName = idxName;
+                Expr zeroLit = new Expr(ExprKind.INT_LIT(), st.line, st.col);
+                zeroLit.intVal = 0;
+                idxDecl.expr = zeroLit;
+
+                Expr arrRef1 = new Expr(ExprKind.IDENT(), st.line, st.col);
+                arrRef1.name = arrName;
+                Expr lenExpr = new Expr(ExprKind.FIELD(), st.line, st.col);
+                lenExpr.left = arrRef1;
+                lenExpr.name = "length";
+
+                Expr idxRef1 = new Expr(ExprKind.IDENT(), st.line, st.col);
+                idxRef1.name = idxName;
+                Expr condExpr = new Expr(ExprKind.BINARY(), st.line, st.col);
+                condExpr.op = BinaryOp.LT();
+                condExpr.left = idxRef1;
+                condExpr.right = lenExpr;
+
+                Expr idxRef2 = new Expr(ExprKind.IDENT(), st.line, st.col);
+                idxRef2.name = idxName;
+                Expr stepExpr = new Expr(ExprKind.UNARY(), st.line, st.col);
+                stepExpr.op = UnaryOp.POST_INC();
+                stepExpr.left = idxRef2;
+
+                Expr arrRef2 = new Expr(ExprKind.IDENT(), st.line, st.col);
+                arrRef2.name = arrName;
+                Expr idxRef3 = new Expr(ExprKind.IDENT(), st.line, st.col);
+                idxRef3.name = idxName;
+                Expr elemIdx = new Expr(ExprKind.INDEX(), st.line, st.col);
+                elemIdx.left = arrRef2;
+                elemIdx.right = idxRef3;
+
+                Stmt elemDecl = new Stmt(StmtKind.VAR_DECL(), st.line, st.col);
+                elemDecl.varType = st.varType;
+                elemDecl.varName = st.varName;
+                elemDecl.expr = elemIdx;
+                elemDecl.isFinal = st.isFinal;
+
+                Stmt loopBody = new Stmt(StmtKind.BLOCK(), st.line, st.col);
+                loopBody.stmts = new StmtList();
+                loopBody.stmts.add(elemDecl);
+                loopBody.stmts.add(origBody);
+
+                Stmt forStmt = new Stmt(StmtKind.FOR(), st.line, st.col);
+                forStmt.initStmt = idxDecl;
+                forStmt.expr = condExpr;
+                forStmt.stepExpr = stepExpr;
+                forStmt.thenBranch = loopBody;
+
+                st.kind = StmtKind.BLOCK();
+                st.stmts = new StmtList();
+                st.stmts.add(arrDecl);
+                st.stmts.add(forStmt);
+                st.expr = null;
+                st.thenBranch = null;
+                this.checkStmt(st);
+                return;
+            }
+
+            if (colTy != null && colTy.kind == TypeKind.CLASS()) {
+                Expr iterField = new Expr(ExprKind.FIELD(), st.line, st.col);
+                iterField.left = st.expr;
+                iterField.name = "iterator";
+                Expr iterCall = new Expr(ExprKind.CALL(), st.line, st.col);
+                iterCall.left = iterField;
+                iterCall.args = new ExprList();
+                this.checkExpr(iterCall);
+                if (this.hadError) return;
+
+                Type iterTy = iterCall.inferredType;
+                String itName = "__fe_it_".concat(String.fromInt(id));
+
+                Stmt itDecl = new Stmt(StmtKind.VAR_DECL(), st.line, st.col);
+                itDecl.varType = iterTy;
+                itDecl.varName = itName;
+                itDecl.expr = iterCall;
+
+                Expr itRef1 = new Expr(ExprKind.IDENT(), st.line, st.col);
+                itRef1.name = itName;
+                Expr hasNextField = new Expr(ExprKind.FIELD(), st.line, st.col);
+                hasNextField.left = itRef1;
+                hasNextField.name = "hasNext";
+                Expr hasNextCall = new Expr(ExprKind.CALL(), st.line, st.col);
+                hasNextCall.left = hasNextField;
+                hasNextCall.args = new ExprList();
+
+                Expr itRef2 = new Expr(ExprKind.IDENT(), st.line, st.col);
+                itRef2.name = itName;
+                Expr nextField = new Expr(ExprKind.FIELD(), st.line, st.col);
+                nextField.left = itRef2;
+                nextField.name = "next";
+                Expr nextCall = new Expr(ExprKind.CALL(), st.line, st.col);
+                nextCall.left = nextField;
+                nextCall.args = new ExprList();
+
+                Stmt elemDecl = new Stmt(StmtKind.VAR_DECL(), st.line, st.col);
+                elemDecl.varType = st.varType;
+                elemDecl.varName = st.varName;
+                elemDecl.expr = nextCall;
+                elemDecl.isFinal = st.isFinal;
+
+                Stmt loopBody = new Stmt(StmtKind.BLOCK(), st.line, st.col);
+                loopBody.stmts = new StmtList();
+                loopBody.stmts.add(elemDecl);
+                loopBody.stmts.add(origBody);
+
+                st.kind = StmtKind.FOR();
+                st.initStmt = itDecl;
+                st.expr = hasNextCall;
+                st.stepExpr = null;
+                st.thenBranch = loopBody;
+                this.checkStmt(st);
+                return;
+            }
+
+            this.errorAt(st.line, st.col, "for-each requires an array or Iterable object");
             return;
         }
         if (k == StmtKind.FOR()) {

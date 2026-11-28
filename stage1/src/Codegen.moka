@@ -1,3 +1,16 @@
+/**
+ * Codegen.moka — C11 code generator for Stage 1 Moka.
+ *
+ * Emits standalone C11 code targeting runtime/runtime.h:
+ * 1. Interface types (emitInterfaceTypes): two-pass emission so fat-pointer
+ *    structs (`{ void* obj; const Iface_VTable* vtable; }`) are complete types
+ *    before any VTable struct or inline dispatch helper references them.
+ * 2. Class structs, RtTypeInfo GC descriptors (ptr_offsets), VTables, and
+ *    per-interface VTables (recursively covering superinterfaces).
+ * 3. Method bodies with cooperative Stop-the-World GC shadow stack frames
+ *    (RtShadowFrame slots + safepoints on loop iterations) and setjmp/longjmp
+ *    exception/finally/synchronized unwinding.
+ */
 public class Codegen {
     private Program prog;
     private ByteBuffer out;

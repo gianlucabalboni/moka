@@ -1,3 +1,10 @@
+/**
+ * Lexer.moka — Single-pass byte-oriented lexical scanner for Moka source files.
+ *
+ * Scans UTF-8 byte arrays into Token instances: identifiers, keywords,
+ * integer/long/float/double/char/string literals (with escape sequences),
+ * operators, and punctuation, while skipping whitespace and // or /* * / comments.
+ */
 public class Lexer {
     public String filename;
     private byte[] src;

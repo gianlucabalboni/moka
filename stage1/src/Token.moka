@@ -1,3 +1,10 @@
+/**
+ * Token.moka — Lexical token definitions for the Stage 1 Moka compiler.
+ *
+ * Defines integer token kind constants (TokenKind) and the Token value class
+ * carrying kind, lexeme, source line, and column. Written in the Stage 0 subset
+ * so stage1 can bootstrap from stage0.
+ */
 public class TokenKind {
     public static int EOF()         { return 0; }
     public static int ERROR()       { return 1; }

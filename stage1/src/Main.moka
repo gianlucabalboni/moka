@@ -1,3 +1,14 @@
+/**
+ * Main.moka — CLI driver (`mokac`) for the Stage 1 Moka compiler.
+ *
+ * Responsibilities:
+ * - Parses CLI options (-o, -r/--run, --emit-c, --keep-c, --no-stdlib, --std-dir,
+ *   --runtime, --runtime-dir, --cc).
+ * - Auto-detects `std/` and `runtime/` relative to CWD or executable directory.
+ * - Auto-queues core stdlib files (unless --no-stdlib or String.moka is explicit,
+ *   as in stage1 bootstrap builds) and recursively resolves `import` directives.
+ * - Runs Lexer -> Parser -> Sema -> Codegen and invokes the C11 compiler (`cc`).
+ */
 public class Main {
     private static void printUsage() {
         Console.eprintln("Usage: mokac <file1.moka> [file2.moka ...] [-o <output>] [-r|--run] [--emit-c] [--keep-c] [--no-stdlib] [--cc <compiler>] [--std-dir <dir>] [--runtime <header>] [--runtime-dir <dir>]");

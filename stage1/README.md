@@ -9,22 +9,26 @@
 - **Self-Hosting**: compilato da [`stage0`](../stage0/README.md) in `build/mokac`, è in grado di compilare se stesso (`mokac_s2`) generando codice C11 identico byte-per-byte (**bootstrap fixed-point**).
 - **Mark-and-Sweep Garbage Collector**: runtime autonomo in [`runtime/runtime.h`](runtime/runtime.h) con **Shadow Stack** (`RtShadowFrame`), descrittori di tipo (`RtTypeInfo` con `offsetof`), attraversamento di istanze e `OBJ_REF_ARRAY`, e safepoint sui cicli `while`/`for` ([dettagli](../docs/it/internals.md)).
 - **Compilazione diretta ad eseguibile**: `build/mokac` invoca automaticamente `cc -std=c11 -Wall -Wextra -Werror` producendo un binario standalone (oppure solo `.c` con `--emit-c` o `-o file.c`).
-- **Auto-rilevamento di `std/` e `runtime/`**: include automaticamente `std/String.moka`, `std/Console.moka`, `std/ByteBuffer.moka`, `std/Io.moka` (disattivabile con `--no-stdlib`).
+- **Auto-rilevamento di `std/` e `runtime/`**: include automaticamente `std/String.moka`, `std/Console.moka`, `std/ByteBuffer.moka`, `std/Io.moka`, `std/Exception.moka`, `std/Runnable.moka`, `std/Thread.moka`, `std/Mutex.moka` (e i moduli importati come `std/Comparable`, `std/Comparator`, `std/Exceptions`, `std/datastructures/*`), disattivabile con `--no-stdlib`.
 - **Estensioni del linguaggio rispetto a Stage 0**:
-  - Cicli `for (init; cond; step)` e `switch / case / default`
+  - Cicli `for (init; cond; step)`, **`for (Type var : expr)` (`for-each` su array e `Iterable`/`Iterator`)** e `switch / case / default`
   - Operatori `++`, `--` (prefissi e postfissi) e assegnamenti composti (`+=`, `-=`, `*=`, `/=`, `%=`)
-  - Operatori bitwise e shift (`&`, `|`, `^`, `~`, `<<`, `>>`) e cast `(int)` / `(byte)`
-  - **Ereditarietà singola (`extends`)**, `super(...)`, `super.metodo(...)`, `super.campo` e **polimorfismo via VTable** ([dettagli](../docs/it/internals.md))
+  - Operatori bitwise e shift (`&`, `|`, `^`, `~`, `<<`, `>>`) e cast `(int)` / `(byte)` / `(long)` / `(double)` / `(float)` / `(char)`
+  - **OOP completo**: ereditarietà singola (`extends`), `super(...)`, `super.metodo(...)`, polimorfismo via VTable, `abstract`, `final`, `static class`, `instanceof` e downcast controllati
+  - **Interfacce ed ereditarietà tra interfacce**: `interface A extends B, C` (fat pointers `{ obj, vtable }`)
+  - **Generics per monomorphization**: classi, interfacce e metodi generici (anche con argomenti primitivi unboxed), diamond `<>` e type inference
+  - **Eccezioni e Concorrenza**: `try / catch / finally / throw` (`setjmp`/`longjmp`), `Thread`, `Runnable`, `Mutex`, `synchronized`
 
 ---
 
 ## Struttura
 
-- [`runtime/runtime.h`](runtime/runtime.h): GC Mark-and-Sweep, Shadow Stack, `RtArray`, `RtTypeInfo` e helper `native`.
-- [`std/`](std): `String.moka`, `Console.moka`, `ByteBuffer.moka`, `Io.moka`.
+- [`runtime/runtime.h`](runtime/runtime.h): GC Mark-and-Sweep STW, Shadow Stack, `RtArray`, `RtTypeInfo`, monitor/mutex e helper `native`.
+- [`std/`](std): libreria standard completa (`String`, `Comparable`, `Comparator`, `Exceptions`, `Math`, `datastructures/*`, ecc.).
+- [`std_boot/`](std_boot): sottoinsieme compatibile con Stage 0 usato per compilare `stage1/src`.
 - [`src/`](src): `Token.moka`, `Lexer.moka`, `Ast.moka`, `Parser.moka`, `Sema.moka`, `Codegen.moka`, `Main.moka`.
-- [`../examples/`](../examples): `linked_list.moka`, `word_count.moka`.
-- [`tests/`](tests): `test_std.moka`, `test_lexer.moka`, `hello_console.moka`, `test_gc.moka`, `test_stage1_features.moka`, `test_inheritance.moka`.
+- [`../examples/`](../examples): programmi di esempio.
+- [`tests/`](tests): suite di test end-to-end (`make all`).
 
 ---
 

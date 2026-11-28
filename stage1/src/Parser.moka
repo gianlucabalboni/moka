@@ -1,3 +1,13 @@
+/**
+ * Parser.moka — Recursive-descent parser with 4-token lookahead (t0..t3).
+ *
+ * Parses Moka compilation units (imports, classes, interfaces, generics,
+ * methods, fields, statements, and expressions) into Ast.Program.
+ * Key disambiguations:
+ * - Generic `<T>` type arguments vs relational `<` / `>` / `>>` operators.
+ * - Java-style `for (Type var : expr)` (StmtKind.FOREACH) vs C-style `for (init; cond; step)`.
+ * - `interface A extends B, C` vs `class A extends B implements C`.
+ */
 public class Parser {
     private Lexer lex;
     private Token[] toks;
@@ -835,7 +845,32 @@ public class Parser {
             if (this.t0.kind == TokenKind.SEMI()) {
                 this.advanceTok();
             } else if (this.isVarDeclStart()) {
-                initStmt = this.parseVarDecl();
+                Token vdTok = this.peek();
+                boolean isFinalVar = this.match(TokenKind.KW_FINAL());
+                Type vty = this.parseType(false);
+                Token vname = this.expect(TokenKind.IDENT(), "expected variable name");
+                if (!this.hadError && this.match(TokenKind.COLON())) {
+                    Expr iterableExpr = this.parseExpr();
+                    this.expect(TokenKind.RPAREN(), "expected ')' after for-each header");
+                    Stmt feBody = this.parseStmt();
+                    Stmt fe = new Stmt(StmtKind.FOREACH(), tok.line, tok.col);
+                    fe.varType = vty;
+                    fe.varName = vname.lexeme;
+                    fe.isFinal = isFinalVar;
+                    fe.expr = iterableExpr;
+                    fe.thenBranch = feBody;
+                    return fe;
+                }
+                Expr initExpr = null;
+                if (!this.hadError && this.match(TokenKind.ASSIGN())) {
+                    initExpr = this.parseExpr();
+                }
+                this.expect(TokenKind.SEMI(), "expected ';' after variable declaration");
+                initStmt = new Stmt(StmtKind.VAR_DECL(), vdTok.line, vdTok.col);
+                initStmt.varType = vty;
+                initStmt.varName = vname.lexeme;
+                initStmt.expr = initExpr;
+                initStmt.isFinal = isFinalVar;
             } else {
                 Token eTok = this.peek();
                 Expr initExpr = this.parseExpr();
